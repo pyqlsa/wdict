@@ -1,0 +1,24 @@
+[package]
+name = "wdict"
+authors = ["pyqlsa"]
+description = "Create dictionaries by scraping webpages."
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+readme = "README.md"
+homepage = "https://github.com/pyqlsa/wdict"
+repository = "https://github.com/pyqlsa/wdict"
+include = [
+  "**/*.rs",
+  "Cargo.toml",
+  "Cargo.lock",
+]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+async-recursion = { version = "1.0.4" }
+clap = { version = "4.3.8", features = ["derive"] }
+reqwest = { version = "0.11.18" }
+scraper = { version = "0.16.0" }
+tokio = { version = "1.28.2", features = ["full"] }
