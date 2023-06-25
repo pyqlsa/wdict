@@ -1,7 +1,8 @@
 //! Simple cli tool to extract words from webpages to build a dictionary.
 //!
 use async_recursion::async_recursion;
-use clap::Parser;
+use clap::{Parser, ValueEnum};
+use deunicode::deunicode;
 use scraper::{node::Node, Html, Selector};
 use std::collections::HashMap;
 use std::fs::File;
@@ -23,6 +24,15 @@ struct Args {
     /// File to write dictionary to (will be overwritten if it already exists).
     #[arg(short, long, default_value = "wdict.txt")]
     file: String,
+    /// Munge strategy for words.
+    #[arg(short, long, default_value = "none", value_enum)]
+    munge: MungeMode,
+}
+
+#[derive(ValueEnum, Copy, Debug, Clone)]
+enum MungeMode {
+    Deunicode,
+    None,
 }
 
 #[tokio::main]
@@ -34,7 +44,7 @@ async fn main() {
     let mut words = HashMap::new();
     links.insert(String::from(args.url), false);
 
-    crawl(&mut links, &mut words, depth, args.limit).await;
+    crawl(&mut links, &mut words, depth, args.limit, args.munge).await;
 
     let len_links = links.len();
     println!("visited links:");
@@ -76,6 +86,7 @@ async fn crawl(
     words: &mut HashMap<String, bool>,
     depth: i32,
     limit: i32,
+    munge: MungeMode,
 ) -> () {
     let deeper = depth + 1;
     for (url, visited) in links.clone().into_iter() {
@@ -86,12 +97,12 @@ async fn crawl(
             links.insert(url.to_owned(), true);
             let document = doc_from_url(String::from(url)).await;
             links_from_doc(links, &document);
-            words_from_doc(words, &document);
+            words_from_doc(words, &document, munge);
         }
     }
     if deeper < limit {
         println!("going deeper... current depth {}", deeper);
-        crawl(links, words, deeper, limit).await;
+        crawl(links, words, deeper, limit, munge).await;
     }
 }
 
@@ -140,25 +151,32 @@ fn links_from_doc(links: &mut HashMap<String, bool>, document: &Html) -> () {
 }
 
 /// Extract words from an html document.
-fn words_from_doc(words: &mut HashMap<String, bool>, document: &Html) -> () {
+///
+/// TODO: better filtering with things like:
+/// - https://github.com/unicode-rs/unicode-normalization
+/// - https://github.com/unicode-rs/unicode-security
+/// - https://github.com/null8626/decancer
+/// - https://github.com/kornelski/deunicode
+fn words_from_doc(words: &mut HashMap<String, bool>, document: &Html, munge: MungeMode) -> () {
     for node in document.clone().tree {
         if let Node::Text(text) = node {
-            let fintext = text.text.trim().to_lowercase();
-            // ignore these characters
-            let fintext = fintext.replace(
-                &[
-                    '\n', '(', ')', ',', '\"', '.', ';', ':', '\'', '-', '[', ']', '{', '}', '*',
-                    '§', '©', '<', '>', '¹', '=', '+', '/', '~', '!', '%', '&', '?', '`', '|', '«',
-                    '»', '´', '·', '–', '¤', '$', '£', '#', '…', '\\', '@', '²', '¨', '”', '•',
-                    '’', '‘', '�', '_',
-                ][..],
-                " ",
-            );
+            let fintext = text.text.trim();
+            let fintext = munge_str(fintext, munge);
+            let fintext = fintext.to_lowercase();
+            // ignore these characters since we're looking for words
+            let fintext = fintext.replace(|c: char| !c.is_alphanumeric(), " ");
             if fintext.len() > 0 {
                 for w in fintext.split_whitespace() {
                     words.entry(String::from(w)).or_insert(true);
                 }
             }
         }
+    }
+}
+
+fn munge_str(s: &str, munge: MungeMode) -> String {
+    match munge {
+        MungeMode::Deunicode => deunicode(s),
+        _ => s.to_string(), // Munge::None
     }
 }
