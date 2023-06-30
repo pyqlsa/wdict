@@ -1,6 +1,10 @@
 # wdict
 Create dictionaries by scraping webpages.
 
+Similar tools (some features inspired by them):
+- [CeWL](https://github.com/digininja/CeWL)
+- [CeWLeR](https://github.com/roys/cewler)
+
 ## Take it for a spin
 ```bash
 # build with nix and run the result
