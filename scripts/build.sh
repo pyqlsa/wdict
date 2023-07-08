@@ -4,8 +4,9 @@ IFS=$' \t\n'
 
 cd "$(dirname "${0}")"/..
 
+
 if [ "${1-}" == "release" ]; then
-  cargo build --release
+  nix develop --command bash -c "cargo build --release"
 else
-  cargo build
+  nix develop --command bash -c "cargo build"
 fi
