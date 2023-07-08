@@ -48,7 +48,6 @@ fn read_file_string(filepath: &str) -> Result<String, Box<dyn std::error::Error>
     Ok(data)
 }
 
-// fn get_help() -> Result<String, Box<dyn std::error::Error>> {
 fn get_help() -> String {
     let cmd = Command::new("cargo")
         .arg("run")

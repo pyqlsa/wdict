@@ -43,7 +43,7 @@ enum FilterArg {
 }
 
 impl FilterArg {
-    /// Get filter mode from arg; exists just to de-couple clap from filter mode
+    /// Get filter mode from arg; exists just to de-couple lib from clap
     fn to_mode(&self) -> FilterMode {
         match self {
             FilterArg::Deunicode => FilterMode::Deunicode,
@@ -63,8 +63,8 @@ enum SitePolicyArg {
     All,
 }
 
-/// Display implementation
 impl SitePolicyArg {
+    /// Get site policy from arg; exists just to de-couple lib from clap
     fn to_mode(&self) -> SitePolicy {
         match self {
             SitePolicyArg::Same => SitePolicy::Same,
