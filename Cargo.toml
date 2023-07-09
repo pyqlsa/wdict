@@ -9,7 +9,7 @@ readme = "README.md"
 homepage = "https://github.com/pyqlsa/wdict"
 repository = "https://github.com/pyqlsa/wdict"
 include = [
-  "**/*.rs",
+  "src/**/*.rs",
   "Cargo.toml",
   "Cargo.lock",
 ]
