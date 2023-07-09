@@ -1,7 +1,7 @@
-use std::io::Write;
+use std::io::{BufRead, Write};
 use std::path::Path;
 use std::process::Command;
-use std::{env, fs, str};
+use std::{env, fs};
 
 fn main() {
     let readme_file = "README.md";
@@ -11,7 +11,7 @@ fn main() {
 
     assert!(env::set_current_dir(&proj_root).is_ok());
 
-    let readme = read_file_string(readme_file).unwrap();
+    let readme = fs::read_to_string(readme_file).unwrap();
     let help_start = readme.find(start_tag).unwrap();
     let help_end = readme.find(end_tag).unwrap();
 
@@ -19,11 +19,7 @@ fn main() {
         "Found help section in readme starting at {}, ending at {}",
         help_start, help_end
     );
-
-    if help_start > help_end {
-        eprintln!("start greater than end, not continuing...");
-        return;
-    }
+    assert!(help_start < help_end, "start >= end, not continuing...");
 
     println!("Getting latest help content...");
     let help_content = get_help();
@@ -43,11 +39,6 @@ fn main() {
     println!("Final readme written");
 }
 
-fn read_file_string(filepath: &str) -> Result<String, Box<dyn std::error::Error>> {
-    let data = fs::read_to_string(filepath)?;
-    Ok(data)
-}
-
 fn get_help() -> String {
     let cmd = Command::new("cargo")
         .arg("run")
@@ -56,9 +47,27 @@ fn get_help() -> String {
         .output()
         .expect("failed to execute process");
 
-    let output = cmd.stdout;
-    match String::from_utf8(output) {
-        Ok(v) => v,
-        Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    // --- This method leaves lines that consist of just whitespace...
+    // let output = cmd.stdout;
+    // match String::from_utf8(output) {
+    //     Ok(v) => v,
+    //     Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
+    // };
+    // --- ...so we do this instead to truncat lines w/ just whitepsace
+
+    let mut fin = "".to_owned();
+    let out = cmd.stdout.as_slice();
+    for line in out.lines() {
+        match line {
+            Ok(l) => {
+                if String::from(l.as_str()).trim().len() < 1 {
+                    fin.push_str("\n");
+                } else {
+                    fin.push_str(format!("{}\n", l).as_str());
+                }
+            }
+            Err(e) => panic!("derp; failed reading output: {}", e),
+        }
     }
+    fin
 }
