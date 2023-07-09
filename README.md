@@ -17,7 +17,8 @@ nix run .# -- --help
 # run it without cloning
 nix run github:pyqlsa/wdict -- --help
 
-# install from crates.io (nixOS users may need to do this within a dev shell)
+# install from crates.io
+# (nixOS users may need to do this within a dev shell)
 cargo install wdict
 
 # using a dev shell
@@ -86,7 +87,7 @@ Options:
 ```
 <!-- readme-help end -->
 
-## TDOO
+## TODO
 A list of ideas for future work:
  - archive mode to crawl and save pages locally
  - build dictionaries from local (archived) pages
