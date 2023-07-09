@@ -5,7 +5,7 @@ use reqwest::Url;
 use std::fs::File;
 use std::io::Write;
 
-use wdict::{Crawler, FilterMode, SitePolicy};
+use wdict::{Crawler, Error, FilterMode, SitePolicy};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -23,6 +23,9 @@ struct Args {
     /// Only save words greater than or equal to this value.
     #[arg(short, long, default_value_t = 3)]
     min_word_length: usize,
+    /// Number of requests to make per second.
+    #[arg(short, long, default_value_t = 20)]
+    req_per_sec: u64,
     /// File to write dictionary to (will be overwritten if it already exists).
     #[arg(short, long, default_value = "wdict.txt")]
     file: String,
@@ -36,21 +39,21 @@ struct Args {
 
 #[derive(ValueEnum, Copy, Debug, Clone)]
 enum FilterArg {
-    /// Transform unicode according to https://github.com/kornelski/deunicode
+    /// Transform unicode according to <https://github.com/kornelski/deunicode>.
     Deunicode,
-    /// Transform unicode according to https://github.com/null8626/decancer
+    /// Transform unicode according to <https://github.com/null8626/decancer>.
     Decancer,
-    /// Leave the string as-is
+    /// Leave the string as-is.
     None,
 }
 
 impl FilterArg {
-    /// Get filter mode from arg; exists just to de-couple lib from clap
+    /// Get filter mode from arg; exists just to de-couple lib from clap.
     fn to_mode(&self) -> FilterMode {
         match self {
-            FilterArg::Deunicode => FilterMode::Deunicode,
-            FilterArg::Decancer => FilterMode::Decancer,
-            FilterArg::None => FilterMode::None,
+            Self::Deunicode => FilterMode::Deunicode,
+            Self::Decancer => FilterMode::Decancer,
+            Self::None => FilterMode::None,
         }
     }
 }
@@ -58,37 +61,38 @@ impl FilterArg {
 /// Defines options for crawling sites.
 #[derive(ValueEnum, Copy, Debug, Clone)]
 enum SitePolicyArg {
-    /// Allow crawling links, only if the domain exactly matches
+    /// Allow crawling links, only if the domain exactly matches.
     Same,
-    /// Allow crawling links if they are the same domain or subdomains
+    /// Allow crawling links if they are the same domain or subdomains.
     Subdomain,
-    /// Allow crawling all links, regardless of domain
+    /// Allow crawling all links, regardless of domain.
     All,
 }
 
 impl SitePolicyArg {
-    /// Get site policy from arg; exists just to de-couple lib from clap
+    /// Get site policy from arg; exists just to de-couple lib from clap.
     fn to_mode(&self) -> SitePolicy {
         match self {
-            SitePolicyArg::Same => SitePolicy::Same,
-            SitePolicyArg::Subdomain => SitePolicy::Subdomain,
-            SitePolicyArg::All => SitePolicy::All,
+            Self::Same => SitePolicy::Same,
+            Self::Subdomain => SitePolicy::Subdomain,
+            Self::All => SitePolicy::All,
         }
     }
 }
 
 /// Main function.
 #[tokio::main]
-async fn main() -> Result<(), Box<dyn std::error::Error>> {
+async fn main() -> Result<(), Error> {
     let args = Args::parse();
     let u = Url::parse(&args.url)?;
     let mut crawler = Crawler::new(
         u,
         args.depth,
         args.min_word_length,
+        args.req_per_sec,
         args.filter.to_mode(),
         args.site.to_mode(),
-    );
+    )?;
 
     crawler.crawl().await;
 

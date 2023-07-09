@@ -53,6 +53,11 @@ Options:
 
           [default: 3]
 
+  -r, --req-per-sec <REQ_PER_SEC>
+          Number of requests to make per second
+
+          [default: 20]
+
   -f, --file <FILE>
           File to write dictionary to (will be overwritten if it already exists)
 
@@ -64,8 +69,8 @@ Options:
           [default: none]
 
           Possible values:
-          - deunicode: Transform unicode according to https://github.com/kornelski/deunicode
-          - decancer:  Transform unicode according to https://github.com/null8626/decancer
+          - deunicode: Transform unicode according to <https://github.com/kornelski/deunicode>
+          - decancer:  Transform unicode according to <https://github.com/null8626/decancer>
           - none:      Leave the string as-is
 
       --site <SITE>
@@ -86,6 +91,9 @@ Options:
 
 ```
 <!-- readme-help end -->
+
+## Lib
+This crate exposes a library, but for the time being, the interfaces should be considered unstable.
 
 ## TODO
 A list of ideas for future work:

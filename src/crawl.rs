@@ -1,45 +1,94 @@
+use crate::error::Error;
 use crate::filter::FilterMode;
+use crate::site::SitePolicy;
 
 use async_recursion::async_recursion;
+use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Node, Html, Selector};
 use std::collections::HashMap;
+use std::time::Duration;
 
-/// Crawls websites, gathering links and words from pages
+/// Crawls websites, gathering links and words from pages.
 pub struct Crawler {
     opts: CrawlOptions,
     links: HashMap<String, bool>,
     words: HashMap<String, bool>,
     cur_depth: usize,
+    client: Client,
+    limiter: Ratelimiter,
 }
 
 impl Crawler {
-    /// Returns a new Crawler instance
+    /// Returns a new Crawler instance with the default `reqwest::Client`.
     pub fn new(
         url: Url,
         depth: usize,
         min_word_length: usize,
+        req_per_sec: u64,
         filter: FilterMode,
         site: SitePolicy,
-    ) -> Crawler {
-        let mut c = Crawler {
+    ) -> Result<Self, Error> {
+        let client = Client::builder()
+            .connect_timeout(std::time::Duration::from_secs(5))
+            .timeout(std::time::Duration::from_secs(10))
+            .build()?;
+        Self::new_with_client(
+            url,
+            depth,
+            min_word_length,
+            req_per_sec,
+            filter,
+            site,
+            client,
+        )
+    }
+
+    /// Returns a new Crawler instance with the provided `reqwest::Client`.
+    pub fn new_with_client(
+        url: Url,
+        depth: usize,
+        min_word_length: usize,
+        req_per_sec: u64,
+        filter: FilterMode,
+        site: SitePolicy,
+        client: Client,
+    ) -> Result<Self, Error> {
+        let tokens = if req_per_sec < 1 { 1 } else { req_per_sec };
+        let limiter = Ratelimiter::builder(tokens, Duration::from_secs(1))
+            .max_tokens(tokens)
+            .initial_available(tokens / 2)
+            .build()?;
+        let mut crawler = Self {
             opts: CrawlOptions::new(url.clone(), depth, min_word_length, filter, site),
             links: HashMap::new(),
             words: HashMap::new(),
             cur_depth: 0,
+            client,
+            limiter,
         };
-        c.links.insert(String::from(url), false);
-        c
+        crawler.to_be_visited(String::from(url));
+        Ok(crawler)
     }
 
-    /// Returns the crawled links
+    /// Returns the crawled links.
     pub fn links(&self) -> HashMap<String, bool> {
         self.links.clone()
     }
 
-    /// Returns the gathered words
+    /// Returns the gathered words.
     pub fn words(&self) -> HashMap<String, bool> {
         self.words.clone()
+    }
+
+    /// Inserts and marks a link as visited.
+    pub fn visited(&mut self, url: String) -> () {
+        self.links.insert(url.to_owned(), true);
+    }
+
+    /// Inserts and marks a link as not yet visited.
+    pub fn to_be_visited(&mut self, url: String) -> () {
+        self.links.insert(url.to_owned(), false);
     }
 
     /// Crawl links up to a given limit, scraping links and words from pages.
@@ -71,8 +120,8 @@ impl Crawler {
             }
 
             println!("visiting {}", url);
-            self.links.insert(url.to_owned(), true);
-            let document = Self::doc_from_url(String::from(url)).await;
+            self.visited(url.to_owned());
+            let document = self.doc_from_url(String::from(url)).await;
             self.links_from_doc(&document);
             self.words_from_doc(&document);
         }
@@ -83,13 +132,16 @@ impl Crawler {
     }
 
     /// Get an html document from the provided url.
-    async fn doc_from_url(url: String) -> Html {
-        let client = Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(10))
-            .build()
-            .unwrap();
-        let response = client.get(url).send().await;
+    async fn doc_from_url(&self, url: String) -> Html {
+        // TODO: do this smarter
+        for _ in 0..10 {
+            if let Err(sleep) = self.limiter.try_wait() {
+                std::thread::sleep(sleep);
+                continue;
+            }
+        }
+
+        let response = self.client.get(url).send().await;
         match response {
             Err(e) => {
                 if e.is_status() {
@@ -163,15 +215,15 @@ struct CrawlOptions {
 }
 
 impl CrawlOptions {
-    /// Returns a new CrawlOptions instance
+    /// Returns a new CrawlOptions instance.
     fn new(
         url: Url,
         depth: usize,
         min_word_length: usize,
         filter: FilterMode,
         site: SitePolicy,
-    ) -> CrawlOptions {
-        CrawlOptions {
+    ) -> Self {
+        Self {
             url,
             depth,
             min_word_length,
@@ -180,79 +232,28 @@ impl CrawlOptions {
         }
     }
 
-    /// Returns the url where crawling initiated from
+    /// Returns the url where crawling initiated from.
     fn url(&self) -> Url {
         self.url.clone()
     }
 
-    /// Returns the link search depth used for crawling
+    /// Returns the link search depth used for crawling.
     fn depth(&self) -> usize {
         self.depth
     }
 
-    /// Returns the minimum word length for saving words to the wordslist
+    /// Returns the minimum word length for saving words to the wordslist.
     fn min_word_length(&self) -> usize {
         self.min_word_length
     }
 
-    /// Returns the configured filter mode for discovered words
+    /// Returns the configured filter mode for discovered words.
     fn filter(&self) -> FilterMode {
         self.filter
     }
 
-    /// Returns the configured site policy for visiting discovered URLs
+    /// Returns the configured site policy for visiting discovered URLs.
     fn site(&self) -> SitePolicy {
         self.site
-    }
-}
-
-/// Defines options for crawling sites.
-#[derive(Copy, Debug, Clone)]
-pub enum SitePolicy {
-    /// Allow crawling links, only if the domain exactly matches
-    Same,
-    /// Allow crawling links if they are the same domain or subdomains
-    Subdomain,
-    /// Allow crawling all links, regardless of domain
-    All,
-}
-
-/// Display implementation
-impl std::fmt::Display for SitePolicy {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            SitePolicy::Same => write!(f, "Same"),
-            SitePolicy::Subdomain => write!(f, "Subdomain"),
-            SitePolicy::All => write!(f, "All"),
-        }
-    }
-}
-
-impl SitePolicy {
-    /// Returns if the given url matches the site visiting policy.
-    pub fn matches_policy(&self, source_url: Url, target_url: Url) -> bool {
-        if target_url.host_str() == None {
-            return false;
-        }
-        match self {
-            SitePolicy::Same => {
-                if target_url.host_str().unwrap_or("fail.___")
-                    == source_url.host_str().unwrap_or("nope.___")
-                {
-                    return true;
-                }
-                return false;
-            }
-            SitePolicy::Subdomain => {
-                let tu = target_url.host_str().unwrap_or("fail.___");
-                let su = source_url.host_str().unwrap_or("nope.___");
-
-                if tu == su || tu.ends_with(format!(".{}", su).as_str()) {
-                    return true;
-                }
-                return false;
-            }
-            SitePolicy::All => return true,
-        }
     }
 }
