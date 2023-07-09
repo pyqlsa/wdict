@@ -39,36 +39,37 @@ Usage: wdict [OPTIONS]
 Options:
   -u, --url <URL>
           URL to start crawling from
-          
+
           [default: https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html]
 
   -d, --depth <DEPTH>
           Limit the depth of crawling links
-          
+
           [default: 1]
 
   -m, --min-word-length <MIN_WORD_LENGTH>
           Only save words greater than or equal to this value
-          
+
           [default: 3]
 
   -f, --file <FILE>
           File to write dictionary to (will be overwritten if it already exists)
-          
+
           [default: wdict.txt]
 
       --filter <FILTER>
           Filter strategy for words
-          
+
           [default: none]
 
           Possible values:
           - deunicode: Transform unicode according to https://github.com/kornelski/deunicode
+          - decancer:  Transform unicode according to https://github.com/null8626/decancer
           - none:      Leave the string as-is
 
       --site <SITE>
           Site policy for discovered links
-          
+
           [default: same]
 
           Possible values:
@@ -84,6 +85,15 @@ Options:
 
 ```
 <!-- readme-help end -->
+
+## TDOO
+A list of ideas for future work:
+ - archive mode to crawl and save pages locally
+ - build dictionaries from local (archived) pages
+ - support different mime types
+ - add a collection of pre-canned 'themed' urls
+ - smarter/togglable parsing of html tags (e.g. to ignore js and css)
+ - more word filtering options
 
 ## License
 

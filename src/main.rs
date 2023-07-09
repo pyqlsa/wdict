@@ -38,6 +38,8 @@ struct Args {
 enum FilterArg {
     /// Transform unicode according to https://github.com/kornelski/deunicode
     Deunicode,
+    /// Transform unicode according to https://github.com/null8626/decancer
+    Decancer,
     /// Leave the string as-is
     None,
 }
@@ -47,6 +49,7 @@ impl FilterArg {
     fn to_mode(&self) -> FilterMode {
         match self {
             FilterArg::Deunicode => FilterMode::Deunicode,
+            FilterArg::Decancer => FilterMode::Decancer,
             FilterArg::None => FilterMode::None,
         }
     }
