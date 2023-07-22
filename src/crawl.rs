@@ -26,7 +26,7 @@ impl Crawler {
         depth: usize,
         min_word_length: usize,
         req_per_sec: u64,
-        filter: FilterMode,
+        filters: Vec<FilterMode>,
         site: SitePolicy,
     ) -> Result<Self, Error> {
         let client = Client::builder()
@@ -38,7 +38,7 @@ impl Crawler {
             depth,
             min_word_length,
             req_per_sec,
-            filter,
+            filters,
             site,
             client,
         )
@@ -50,7 +50,7 @@ impl Crawler {
         depth: usize,
         min_word_length: usize,
         req_per_sec: u64,
-        filter: FilterMode,
+        filters: Vec<FilterMode>,
         site: SitePolicy,
         client: Client,
     ) -> Result<Self, Error> {
@@ -60,7 +60,7 @@ impl Crawler {
             .initial_available(tokens / 2)
             .build()?;
         let mut crawler = Self {
-            opts: CrawlOptions::new(url.clone(), depth, min_word_length, filter, site),
+            opts: CrawlOptions::new(url.clone(), depth, min_word_length, filters, site),
             links: HashMap::new(),
             words: HashMap::new(),
             cur_depth: 0,
@@ -182,11 +182,13 @@ impl Crawler {
     fn words_from_doc(&mut self, document: &Html) -> () {
         for node in document.clone().tree {
             if let Node::Text(text) = node {
-                let fintext = text.text.trim();
-                let fintext = self.opts.filter().filter_str(fintext);
-                let fintext = fintext.to_lowercase();
+                let mut fintext = text.text.trim().to_string();
+                for filter in self.opts.filters() {
+                    fintext = filter.filter_str(&fintext);
+                }
+                fintext = fintext.to_lowercase();
                 // ignore these characters since we're looking for words
-                let fintext = fintext.replace(|c: char| !c.is_alphanumeric(), " ");
+                fintext = fintext.replace(|c: char| !c.is_alphanumeric(), " ");
                 if fintext.len() > 0 {
                     for w in fintext.split_whitespace() {
                         if w.len() >= self.opts.min_word_length() {
@@ -208,8 +210,8 @@ struct CrawlOptions {
     depth: usize,
     /// Only save words greater than or equal to this value.
     min_word_length: usize,
-    /// Filter strategy for words.
-    filter: FilterMode,
+    /// Filter strategy for words; multiple can be specified.
+    filters: Vec<FilterMode>,
     /// Strategy for link crawling.
     site: SitePolicy,
 }
@@ -220,14 +222,14 @@ impl CrawlOptions {
         url: Url,
         depth: usize,
         min_word_length: usize,
-        filter: FilterMode,
+        filters: Vec<FilterMode>,
         site: SitePolicy,
     ) -> Self {
         Self {
             url,
             depth,
             min_word_length,
-            filter,
+            filters,
             site,
         }
     }
@@ -248,8 +250,8 @@ impl CrawlOptions {
     }
 
     /// Returns the configured filter mode for discovered words.
-    fn filter(&self) -> FilterMode {
-        self.filter
+    fn filters(&self) -> Vec<FilterMode> {
+        self.filters.clone()
     }
 
     /// Returns the configured site policy for visiting discovered URLs.

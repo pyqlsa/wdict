@@ -35,13 +35,19 @@ cargo build --release
 ```bash
 Create dictionaries by scraping webpages.
 
-Usage: wdict [OPTIONS]
+Usage: wdict [OPTIONS] <--url <URL>|--theme <THEME>>
 
 Options:
   -u, --url <URL>
           URL to start crawling from
 
-          [default: https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html]
+      --theme <THEME>
+          Pre-canned theme URLs to start crawling from (for fun, demoing features, and sparking new ideas)
+
+          Possible values:
+          - star-wars: Star Wars themed URL <https://www.starwars.com/databank>
+          - tolkien:   Tolkien themed URL <https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html>
+          - witcher:   Witcher themed URL <https://witcher.fandom.com/wiki/Elder_Speech>
 
   -d, --depth <DEPTH>
           Limit the depth of crawling links
@@ -63,15 +69,17 @@ Options:
 
           [default: wdict.txt]
 
-      --filter <FILTER>
-          Filter strategy for words
+      --filters <FILTERS>...
+          Filter strategy for words; multiple can be specified
 
           [default: none]
 
           Possible values:
-          - deunicode: Transform unicode according to <https://github.com/kornelski/deunicode>
-          - decancer:  Transform unicode according to <https://github.com/null8626/decancer>
-          - none:      Leave the string as-is
+          - deunicode:   Transform unicode according to <https://github.com/kornelski/deunicode>
+          - decancer:    Transform unicode according to <https://github.com/null8626/decancer>
+          - all-numbers: Ignore words that consist of all numbers
+          - any-numbers: Ignore words that contain any number
+          - none:        Leave the word as-is
 
       --site <SITE>
           Site policy for discovered links
@@ -100,9 +108,9 @@ A list of ideas for future work:
  - archive mode to crawl and save pages locally
  - build dictionaries from local (archived) pages
  - support different mime types
- - add a collection of pre-canned 'themed' urls
  - smarter/togglable parsing of html tags (e.g. to ignore js and css)
  - more word filtering options
+ - better async
 
 ## License
 

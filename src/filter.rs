@@ -12,7 +12,11 @@ pub enum FilterMode {
     Deunicode,
     /// Transform unicode according to <https://github.com/null8626/decancer>.
     Decancer,
-    /// Leave the string as-is.
+    /// Ignore words that consist of all numbers.
+    AllNumbers,
+    /// Ignore words that contain any number.
+    AnyNumbers,
+    /// Leave the word as-is.
     None,
 }
 
@@ -22,7 +26,48 @@ impl FilterMode {
         match self {
             Self::Deunicode => deunicode(s),
             Self::Decancer => cure(s).into_str(),
+            Self::AllNumbers => filter_all_numeric(s),
+            Self::AnyNumbers => filter_any_numeric(s),
             Self::None => s.to_string(),
         }
+    }
+}
+
+fn filter_all_numeric(s: &str) -> String {
+    let chars_are_numeric: Vec<bool> = s.chars().map(|c| c.is_numeric()).collect();
+    if chars_are_numeric.contains(&false) {
+        s.to_string()
+    } else {
+        "".to_string()
+    }
+}
+
+fn filter_any_numeric(s: &str) -> String {
+    let chars_are_numeric: Vec<bool> = s.chars().map(|c| c.is_numeric()).collect();
+    if chars_are_numeric.contains(&true) {
+        "".to_string()
+    } else {
+        s.to_string()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_filter_all_numeric() {
+        assert_eq!(filter_all_numeric("11"), "".to_string());
+        assert_eq!(filter_all_numeric("a1"), "a1".to_string());
+        assert_eq!(filter_all_numeric("ab"), "ab".to_string());
+        assert_eq!(filter_all_numeric(""), "".to_string());
+    }
+
+    #[test]
+    fn test_filter_any_numeric() {
+        assert_eq!(filter_any_numeric("11"), "".to_string());
+        assert_eq!(filter_any_numeric("a1"), "".to_string());
+        assert_eq!(filter_any_numeric("ab"), "ab".to_string());
+        assert_eq!(filter_any_numeric(""), "".to_string());
     }
 }
