@@ -81,6 +81,12 @@ Options:
           - any-numbers: Ignore words that contain any number
           - none:        Leave the word as-is
 
+  -j, --inclue-js
+          Include javascript from <script> tags and links
+
+  -c, --inclue-css
+          Include CSS from <style> tags links
+
       --site <SITE>
           Site policy for discovered links
 

@@ -5,7 +5,7 @@ use crate::site::SitePolicy;
 use async_recursion::async_recursion;
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
-use scraper::{node::Node, Html, Selector};
+use scraper::{node::Element, node::Node, Html};
 use std::collections::HashMap;
 use std::time::Duration;
 
@@ -27,6 +27,8 @@ impl Crawler {
         min_word_length: usize,
         req_per_sec: u64,
         filters: Vec<FilterMode>,
+        include_js: bool,
+        include_css: bool,
         site: SitePolicy,
     ) -> Result<Self, Error> {
         let client = Client::builder()
@@ -39,6 +41,8 @@ impl Crawler {
             min_word_length,
             req_per_sec,
             filters,
+            include_js,
+            include_css,
             site,
             client,
         )
@@ -51,6 +55,8 @@ impl Crawler {
         min_word_length: usize,
         req_per_sec: u64,
         filters: Vec<FilterMode>,
+        include_js: bool,
+        include_css: bool,
         site: SitePolicy,
         client: Client,
     ) -> Result<Self, Error> {
@@ -60,7 +66,15 @@ impl Crawler {
             .initial_available(tokens / 2)
             .build()?;
         let mut crawler = Self {
-            opts: CrawlOptions::new(url.clone(), depth, min_word_length, filters, site),
+            opts: CrawlOptions::new(
+                url.clone(),
+                depth,
+                min_word_length,
+                filters,
+                include_js,
+                include_css,
+                site,
+            ),
             links: HashMap::new(),
             words: HashMap::new(),
             cur_depth: 0,
@@ -104,7 +118,7 @@ impl Crawler {
             if !self
                 .opts
                 .site()
-                .matches_policy(self.opts.url(), result.unwrap())
+                .matches_policy(self.opts.url(), result.clone().unwrap())
             {
                 println!(
                     "site policy '{}' violated for url: '{}', skipping...",
@@ -122,7 +136,7 @@ impl Crawler {
             println!("visiting {}", url);
             self.visited(url.to_owned());
             let document = self.doc_from_url(String::from(url)).await;
-            self.links_from_doc(&document);
+            self.links_from_doc(&result.unwrap(), &document);
             self.words_from_doc(&document);
         }
         if self.cur_depth < self.opts.depth() {
@@ -133,11 +147,13 @@ impl Crawler {
 
     /// Get an html document from the provided url.
     async fn doc_from_url(&self, url: String) -> Html {
-        // TODO: do this smarter
+        // TODO: do this smarter?
         for _ in 0..10 {
             if let Err(sleep) = self.limiter.try_wait() {
                 std::thread::sleep(sleep);
                 continue;
+            } else {
+                break;
             }
         }
 
@@ -145,18 +161,24 @@ impl Crawler {
         match response {
             Err(e) => {
                 if e.is_status() {
-                    let status_code = e.status().expect("derp").as_u16();
-                    match status_code {
-                        429 => {
-                            println!("wait and retry on 429 not implemented, skipping...")
+                    if let Some(status_code) = e.status() {
+                        match status_code.as_u16() {
+                            429 => {
+                                // breadcrumbs? https://github.com/rust-lang-nursery/rust-cookbook/pull/395/files
+                                println!("wait and retry on 429 not implemented, skipping...");
+                            }
+                            _ => {
+                                println!("unexpected status code: {}", status_code);
+                            }
                         }
-                        _ => {
-                            println!("Unexpected status code: {}", status_code);
-                        }
+                    } else {
+                        eprintln!("expected error with status code, but found none: {}", e);
                     }
                 } else {
-                    eprintln!("unknown error: {}", e);
+                    eprintln!("unexpected error: {}", e);
                 }
+
+                // Return empty doc, as there's nothing to parse.
                 Html::new_document()
             }
             Ok(res) => {
@@ -168,33 +190,122 @@ impl Crawler {
     }
 
     /// Extract links from an html document.
-    fn links_from_doc(&mut self, document: &Html) -> () {
-        let link_selector = Selector::parse(r#"a[href^="http"]"#).unwrap();
+    fn links_from_doc(&mut self, url: &Url, document: &Html) -> () {
+        // breadcrumbs for using selector to extract links from elements...
+        //let link_selector = Selector::parse(r#"a[href^="http"]"#).unwrap();
+        //
+        //for elem in document.clone().select(&link_selector) {
+        //    self.links
+        //        .entry(String::from(elem.value().attr("href").unwrap()))
+        //        .or_insert(false);
+        //}
+        for d in document.clone().root_element().descendants() {
+            if let Node::Element(elem) = d.value() {
+                if let Some(href) = elem.attr("href") {
+                    if href != "" {
+                        let result = Url::parse(href);
+                        match result {
+                            Err(_e) => {
+                                // likely a relative url
+                                if href.starts_with('#') {
+                                    // ignore anchor links
+                                    continue;
+                                }
+                                if let Ok(base_url) =
+                                    Url::parse(url.origin().unicode_serialization().as_str())
+                                {
+                                    if let Ok(joined_url) = base_url.join(href) {
+                                        let final_url = String::from(joined_url.as_str());
+                                        self.conditional_insert_link(final_url, elem)
+                                    } else {
+                                        // errors along the way, skipping href
+                                        continue;
+                                    }
+                                } else {
+                                    // errors along the way, skipping href
+                                    continue;
+                                }
+                            }
+                            Ok(u) => {
+                                // must be a valid full url
+                                let final_url = String::from(u.as_str());
+                                self.conditional_insert_link(final_url, elem)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
-        for elem in document.clone().select(&link_selector) {
-            self.links
-                .entry(String::from(elem.value().attr("href").unwrap()))
-                .or_insert(false);
+    /// Conditionally save the given url if it adheres to configured options,
+    /// determined by the given element; given element is intended to be the
+    /// element from which  the url was extracted from.
+    fn conditional_insert_link(&mut self, url: String, elem: &Element) -> () {
+        if url.as_str() != "" {
+            match elem.name() {
+                "link" => {
+                    if self.opts.include_css() && elem.attr("rel").unwrap() == "stylesheet" {
+                        self.links.entry(url.clone()).or_insert(false);
+                    }
+                    if self.opts.include_js() && elem.attr("as").unwrap() == "script" {
+                        self.links.entry(url.clone()).or_insert(false);
+                    }
+                }
+                "a" => {
+                    self.links.entry(url.clone()).or_insert(false);
+                }
+                _ => {}
+            }
         }
     }
 
     /// Extract words from an html document.
     fn words_from_doc(&mut self, document: &Html) -> () {
-        for node in document.clone().tree {
-            if let Node::Text(text) = node {
-                let mut fintext = text.text.trim().to_string();
-                for filter in self.opts.filters() {
-                    fintext = filter.filter_str(&fintext);
-                }
-                fintext = fintext.to_lowercase();
-                // ignore these characters since we're looking for words
-                fintext = fintext.replace(|c: char| !c.is_alphanumeric(), " ");
-                if fintext.len() > 0 {
-                    for w in fintext.split_whitespace() {
-                        if w.len() >= self.opts.min_word_length() {
-                            self.words.entry(String::from(w)).or_insert(true);
+        // note: alternatives to getting all text nodes (regardless if script/styel/etc. or not)
+        //for text in document.clone().root_element().text() { ...do something... }
+        for d in document.clone().root_element().descendants() {
+            if let Node::Text(text) = d.value() {
+                let parent_tag = d
+                    .parent()
+                    .unwrap()
+                    .value()
+                    .as_element()
+                    .unwrap()
+                    .name()
+                    .to_lowercase();
+                match parent_tag.as_str() {
+                    // if parent node is a script tag, means it shouldn't be js
+                    "script" => {
+                        if self.opts.include_js() {
+                            self.filter_text(&text.text);
                         }
                     }
+                    // if parent node is a style tag, means it shouldn't be css
+                    "style" => {
+                        if self.opts.include_css() {
+                            self.filter_text(&text.text);
+                        }
+                    }
+                    // if not ignored, send it
+                    _ => self.filter_text(&text.text),
+                }
+            }
+        }
+    }
+
+    fn filter_text(&mut self, text: &str) -> () {
+        let mut fintext = text.to_string();
+        for filter in self.opts.filters() {
+            fintext = filter.filter_str(&fintext);
+        }
+        fintext = fintext.to_lowercase();
+        // ignore these characters since we're looking for words
+        fintext = fintext.replace(|c: char| !c.is_alphanumeric(), " ");
+        if fintext.len() > 0 {
+            for w in fintext.split_whitespace() {
+                if w.len() >= self.opts.min_word_length() {
+                    self.words.entry(String::from(w)).or_insert(true);
                 }
             }
         }
@@ -212,6 +323,10 @@ struct CrawlOptions {
     min_word_length: usize,
     /// Filter strategy for words; multiple can be specified.
     filters: Vec<FilterMode>,
+    /// Include javascript from html pages.
+    include_js: bool,
+    /// Include css from html pages.
+    include_css: bool,
     /// Strategy for link crawling.
     site: SitePolicy,
 }
@@ -223,6 +338,8 @@ impl CrawlOptions {
         depth: usize,
         min_word_length: usize,
         filters: Vec<FilterMode>,
+        include_js: bool,
+        include_css: bool,
         site: SitePolicy,
     ) -> Self {
         Self {
@@ -230,6 +347,8 @@ impl CrawlOptions {
             depth,
             min_word_length,
             filters,
+            include_js,
+            include_css,
             site,
         }
     }
@@ -252,6 +371,16 @@ impl CrawlOptions {
     /// Returns the configured filter mode for discovered words.
     fn filters(&self) -> Vec<FilterMode> {
         self.filters.clone()
+    }
+
+    /// Returns whether or not configuration dictates  to include js.
+    fn include_js(&self) -> bool {
+        self.include_js
+    }
+
+    /// Returns whether or not configuration dictates  to include css.
+    fn include_css(&self) -> bool {
+        self.include_css
     }
 
     /// Returns the configured site policy for visiting discovered URLs.

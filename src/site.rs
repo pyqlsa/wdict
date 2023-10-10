@@ -25,28 +25,34 @@ impl std::fmt::Display for SitePolicy {
 impl SitePolicy {
     /// Returns if the given url matches the site visiting policy.
     pub fn matches_policy(&self, source_url: Url, target_url: Url) -> bool {
-        if target_url.host_str() == None {
-            return false;
-        }
         match self {
             Self::Same => {
-                if target_url.host_str().unwrap_or("fail.___")
-                    == source_url.host_str().unwrap_or("nope.___")
-                {
-                    return true;
+                if let Some(tu) = target_url.host_str() {
+                    if let Some(su) = source_url.host_str() {
+                        if tu == su {
+                            return true;
+                        }
+                    }
                 }
                 return false;
             }
             Self::Subdomain => {
-                let tu = target_url.host_str().unwrap_or("fail.___");
-                let su = source_url.host_str().unwrap_or("nope.___");
-
-                if tu == su || tu.ends_with(format!(".{}", su).as_str()) {
-                    return true;
+                if let Some(tu) = target_url.host_str() {
+                    if let Some(su) = source_url.host_str() {
+                        if tu == su || tu.ends_with(format!(".{}", su).as_str()) {
+                            return true;
+                        }
+                    }
                 }
                 return false;
             }
-            Self::All => return true,
+            Self::All => {
+                // Throw away targets w/o host.
+                if target_url.host_str() == None {
+                    return false;
+                }
+                return true;
+            }
         }
     }
 }

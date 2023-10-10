@@ -34,6 +34,12 @@ struct Cli {
         value_delimiter = ',',
     )]
     filters: Vec<FilterArg>,
+    /// Include javascript from <script> tags and links.
+    #[arg(short = 'j', long, default_value_t = false)]
+    inclue_js: bool,
+    /// Include CSS from <style> tags links.
+    #[arg(short = 'c', long, default_value_t = false)]
+    inclue_css: bool,
     /// Site policy for discovered links.
     #[arg(long, default_value = "same", value_enum)]
     site: SitePolicyArg,
@@ -65,7 +71,6 @@ macro_rules! tolkien_url {
         "https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html"
     };
 }
-
 macro_rules! witcher_url {
     () => {
         "https://witcher.fandom.com/wiki/Elder_Speech"
@@ -163,6 +168,8 @@ async fn main() -> Result<(), Error> {
         args.min_word_length,
         args.req_per_sec,
         to_modes(args.filters),
+        args.inclue_js,
+        args.inclue_css,
         args.site.to_mode(),
     )?;
 
