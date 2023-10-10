@@ -114,7 +114,6 @@ A list of ideas for future work:
  - archive mode to crawl and save pages locally
  - build dictionaries from local (archived) pages
  - support different mime types
- - smarter/togglable parsing of html tags (e.g. to ignore js and css)
  - more word filtering options
  - better async
 
