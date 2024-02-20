@@ -12,7 +12,7 @@ use wdict::{Crawler, Error, FilterMode, SitePolicy};
 struct Cli {
     /// URL to start crawling from.
     #[command(flatten)]
-    url: Site,
+    site: Site,
     /// Limit the depth of crawling links.
     #[arg(short, long, default_value_t = 1)]
     depth: usize,
@@ -25,7 +25,7 @@ struct Cli {
     /// File to write dictionary to (will be overwritten if it already exists).
     #[arg(short, long, default_value = "wdict.txt")]
     file: String,
-    /// Filter strategy for words; multiple can be specified.
+    /// Filter strategy for words; multiple can be specified (comma separated).
     #[arg(
         long,
         default_value = "none",
@@ -42,7 +42,7 @@ struct Cli {
     inclue_css: bool,
     /// Site policy for discovered links.
     #[arg(long, default_value = "same", value_enum)]
-    site: SitePolicyArg,
+    site_policy: SitePolicyArg,
 }
 
 #[derive(Args, Debug, Clone)]
@@ -54,7 +54,7 @@ struct Site {
     /// Pre-canned theme URLs to start crawling from (for fun, demoing features, and sparking new
     /// ideas).
     #[arg(long, value_enum)]
-    theme: Theme,
+    theme: Option<Theme>,
 }
 
 // Need to wait on https://github.com/clap-rs/clap/issues/2639 before using macros in doc comments
@@ -156,12 +156,17 @@ impl SitePolicyArg {
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args = Cli::parse();
-    let site = &args.url;
+    let site = &args.site;
     let url = if let Some(url_str) = site.url.as_deref() {
         Url::parse(url_str)?
     } else {
-        Url::parse(site.theme.as_str())?
+        if let Some(t) = site.theme {
+            Url::parse(t.as_str())?
+        } else {
+            Url::parse("")?
+        }
     };
+
     let mut crawler = Crawler::new(
         url,
         args.depth,
@@ -170,7 +175,7 @@ async fn main() -> Result<(), Error> {
         to_modes(args.filters),
         args.inclue_js,
         args.inclue_css,
-        args.site.to_mode(),
+        args.site_policy.to_mode(),
     )?;
 
     crawler.crawl().await;

@@ -25,11 +25,19 @@ impl FilterMode {
     pub fn filter_str(&self, s: &str) -> String {
         match self {
             Self::Deunicode => deunicode(s),
-            Self::Decancer => cure(s).into_str(),
+            Self::Decancer => filter_decancer(s),
             Self::AllNumbers => filter_all_numeric(s),
             Self::AnyNumbers => filter_any_numeric(s),
             Self::None => s.to_string(),
         }
+    }
+}
+
+fn filter_decancer(s: &str) -> String {
+    let out = cure(s);
+    match out {
+        Err(..) => "".to_string(),
+        Ok(o) => o.to_string(),
     }
 }
 
