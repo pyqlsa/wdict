@@ -76,6 +76,16 @@ macro_rules! witcher_url {
         "https://witcher.fandom.com/wiki/Elder_Speech"
     };
 }
+macro_rules! pokemon_url {
+    () => {
+        "https://www.smogon.com"
+    };
+}
+macro_rules! bebop_url {
+    () => {
+        "https://cowboybebop.fandom.com/wiki/Cowboy_Bebop"
+    };
+}
 
 #[derive(ValueEnum, Copy, Debug, Clone)]
 enum Theme {
@@ -85,6 +95,10 @@ enum Theme {
     Tolkien,
     /// Witcher themed URL <https://witcher.fandom.com/wiki/Elder_Speech>.
     Witcher,
+    /// Pokemon themed URL <https://www.smogon.com>.
+    Pokemon,
+    /// Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>.
+    Bebop,
 }
 
 impl Theme {
@@ -94,6 +108,8 @@ impl Theme {
             Self::StarWars => starwars_url!(),
             Self::Tolkien => tolkien_url!(),
             Self::Witcher => witcher_url!(),
+            Self::Pokemon => pokemon_url!(),
+            Self::Bebop => bebop_url!(),
         }
     }
 }

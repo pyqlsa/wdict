@@ -48,6 +48,8 @@ Options:
           - star-wars: Star Wars themed URL <https://www.starwars.com/databank>
           - tolkien:   Tolkien themed URL <https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html>
           - witcher:   Witcher themed URL <https://witcher.fandom.com/wiki/Elder_Speech>
+          - pokemon:   Pokemon themed URL <https://www.smogon.com>
+          - bebop:     Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>
 
   -d, --depth <DEPTH>
           Limit the depth of crawling links
