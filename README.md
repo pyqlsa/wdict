@@ -70,7 +70,7 @@ Options:
           [default: wdict.txt]
 
       --filters <FILTERS>...
-          Filter strategy for words; multiple can be specified
+          Filter strategy for words; multiple can be specified (comma separated)
 
           [default: none]
 
@@ -87,7 +87,7 @@ Options:
   -c, --inclue-css
           Include CSS from <style> tags links
 
-      --site <SITE>
+      --site-policy <SITE_POLICY>
           Site policy for discovered links
 
           [default: same]
