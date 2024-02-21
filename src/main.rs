@@ -124,6 +124,18 @@ enum FilterArg {
     AllNumbers,
     /// Ignore words that contain any number.
     AnyNumbers,
+    /// Ignore words that contain no numbers.
+    NoNumbers,
+    /// Keep only words that exclusively contain numbers.
+    OnlyNumbers,
+    /// Ignore words that consist of all ascii characters.
+    AllAscii,
+    /// Ignore words that contain any ascii character.
+    AnyAscii,
+    /// Ignore words that contain no ascii characters.
+    NoAscii,
+    /// Keep only words that exclusively contain ascii characters.
+    OnlyAscii,
     /// Leave the word as-is.
     None,
 }
@@ -136,6 +148,12 @@ impl FilterArg {
             Self::Decancer => FilterMode::Decancer,
             Self::AllNumbers => FilterMode::AllNumbers,
             Self::AnyNumbers => FilterMode::AnyNumbers,
+            Self::NoNumbers => FilterMode::NoNumbers,
+            Self::OnlyNumbers => FilterMode::OnlyNumbers,
+            Self::AllAscii => FilterMode::AllAscii,
+            Self::AnyAscii => FilterMode::AnyAscii,
+            Self::NoAscii => FilterMode::NoAscii,
+            Self::OnlyAscii => FilterMode::OnlyAscii,
             Self::None => FilterMode::None,
         }
     }

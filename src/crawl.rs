@@ -275,13 +275,13 @@ impl Crawler {
                     .name()
                     .to_lowercase();
                 match parent_tag.as_str() {
-                    // if parent node is a script tag, means it shouldn't be js
+                    // if parent node is a script tag, means it should be js
                     "script" => {
                         if self.opts.include_js() {
                             self.filter_text(&text.text);
                         }
                     }
-                    // if parent node is a style tag, means it shouldn't be css
+                    // if parent node is a style tag, means it should be css
                     "style" => {
                         if self.opts.include_css() {
                             self.filter_text(&text.text);
@@ -295,17 +295,18 @@ impl Crawler {
     }
 
     fn filter_text(&mut self, text: &str) -> () {
-        let mut fintext = text.to_string();
-        for filter in self.opts.filters() {
-            fintext = filter.filter_str(&fintext);
-        }
-        fintext = fintext.to_lowercase();
+        let mut tmp = text.to_string();
+        tmp = tmp.to_lowercase();
         // ignore these characters since we're looking for words
-        fintext = fintext.replace(|c: char| !c.is_alphanumeric(), " ");
-        if fintext.len() > 0 {
-            for w in fintext.split_whitespace() {
-                if w.len() >= self.opts.min_word_length() {
-                    self.words.entry(String::from(w)).or_insert(true);
+        tmp = tmp.replace(|c: char| !c.is_alphanumeric(), " ");
+        if tmp.len() > 0 {
+            for w in tmp.split_whitespace() {
+                let mut fintext = w.to_string();
+                for filter in self.opts.filters() {
+                    fintext = filter.filter_str(&fintext);
+                }
+                if fintext.len() >= self.opts.min_word_length() {
+                    self.words.entry(String::from(fintext)).or_insert(true);
                 }
             }
         }

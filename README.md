@@ -77,11 +77,17 @@ Options:
           [default: none]
 
           Possible values:
-          - deunicode:   Transform unicode according to <https://github.com/kornelski/deunicode>
-          - decancer:    Transform unicode according to <https://github.com/null8626/decancer>
-          - all-numbers: Ignore words that consist of all numbers
-          - any-numbers: Ignore words that contain any number
-          - none:        Leave the word as-is
+          - deunicode:    Transform unicode according to <https://github.com/kornelski/deunicode>
+          - decancer:     Transform unicode according to <https://github.com/null8626/decancer>
+          - all-numbers:  Ignore words that consist of all numbers
+          - any-numbers:  Ignore words that contain any number
+          - no-numbers:   Ignore words that contain no numbers
+          - only-numbers: Keep only words that exclusively contain numbers
+          - all-ascii:    Ignore words that consist of all ascii characters
+          - any-ascii:    Ignore words that contain any ascii character
+          - no-ascii:     Ignore words that contain no ascii characters
+          - only-ascii:   Keep only words that exclusively contain ascii characters
+          - none:         Leave the word as-is
 
   -j, --inclue-js
           Include javascript from <script> tags and links
