@@ -1,4 +1,6 @@
 { lib
+, darwin
+, system
 , naersk
 , targetPlatform
 , pkg-config
@@ -12,6 +14,7 @@
 }:
 let
   cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
+  optionalItems = cond: items: if cond then items else [ ];
 in
 naersk.lib."${targetPlatform.system}".buildPackage {
   src = ./.;
@@ -23,7 +26,7 @@ naersk.lib."${targetPlatform.system}".buildPackage {
     pkg-config
     libiconv
     openssl
-  ];
+  ] ++ (optionalItems (system == "aarch64-darwin") [ darwin.apple_sdk.frameworks.SystemConfiguration ]);
   checkInputs = [
     cargo
     rustc
