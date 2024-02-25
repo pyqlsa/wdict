@@ -2,6 +2,8 @@
 set -euo pipefail
 IFS=$' \t\n'
 
-cd "$(dirname "${0}")"
+workDir="${1-"$(dirname "${0}")"/..}"
 
-nix develop --command bash -c "./_lint.sh"
+pushd "${workDir}"
+nix flake check --all-systems
+popd

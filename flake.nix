@@ -68,12 +68,26 @@
       checks = forSystems (pkgs: {
         format = pkgs.runCommand "check-format"
           {
-            buildInputs = with pkgs; [ rustfmt cargo ];
-          } ''
-          ${pkgs.rustfmt}/bin/cargo-fmt fmt --manifest-path ${./.}/Cargo.toml -- --check
-          ${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt --check ${./.}
-          touch $out # it worked!
-        '';
+            buildInputs = with pkgs; [ rustfmt cargo nixpkgs-fmt shellcheck ];
+          }
+          ''
+            shopt -s globstar nullglob
+            pushd "${./.}"
+
+            for file in ./**/Cargo.toml; do
+              cargo-fmt fmt --manifest-path "''${file}" -- --check
+            done
+
+            nixpkgs-fmt --check .
+
+            for file in ./scripts/*.sh; do
+              shellcheck --severity=info "''${file}"
+            done
+
+            popd
+
+            touch $out # it worked!
+          '';
         "${cargoToml.package.name}" = pkgs."${cargoToml.package.name}";
       });
     };
