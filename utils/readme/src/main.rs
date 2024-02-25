@@ -53,7 +53,7 @@ fn get_help() -> String {
     //     Ok(v) => v,
     //     Err(e) => panic!("Invalid UTF-8 sequence: {}", e),
     // };
-    // --- ...so we do this instead to truncat lines w/ just whitepsace
+    // --- ...so we do this instead to truncate lines w/ just whitepsace
 
     let mut fin = "".to_owned();
     let out = cmd.stdout.as_slice();
