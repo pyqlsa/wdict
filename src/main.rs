@@ -5,7 +5,7 @@ use reqwest::Url;
 use std::fs::File;
 use std::io::Write;
 
-use wdict::{Crawler, Error, FilterMode, SitePolicy};
+use wdict::{Crawler, Error, Extractor, FilterMode, SitePolicy};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -204,9 +204,7 @@ async fn main() -> Result<(), Error> {
     let mut crawler = Crawler::new(
         url,
         args.depth,
-        args.min_word_length,
         args.req_per_sec,
-        to_modes(args.filters),
         args.inclue_js,
         args.inclue_css,
         args.site_policy.to_mode(),
@@ -216,27 +214,38 @@ async fn main() -> Result<(), Error> {
 
     let len_links = crawler.links().len();
     println!("visited links:");
-    crawler.links().into_iter().for_each(|(k, v)| {
-        if v {
-            println!("- {}", k)
+    crawler.links().iter().for_each(|(url, visited)| {
+        if *visited {
+            println!("- {}", url)
         }
     });
     println!("links discovered but not visited:");
-    crawler.links().into_iter().for_each(|(k, v)| {
-        if !v {
-            println!("- {}", k)
+    crawler.links().iter().for_each(|(url, visited)| {
+        if !*visited {
+            println!("- {}", url)
         }
     });
     println!("total unique links discovered: {}", len_links);
     println!();
 
-    let len_words = crawler.words().len();
+    let mut extractor = Extractor::new(
+        args.min_word_length,
+        to_modes(args.filters),
+        args.inclue_js,
+        args.inclue_css,
+    )?;
+
+    crawler.docs().iter().for_each(|doc| {
+        extractor.words_from_doc(&doc);
+    });
+
+    let len_words = extractor.words().len();
     println!("unique words: {}", len_words);
 
     println!("writing dictionary to file: {}", args.output);
     let mut file = File::create(args.output).expect("Error creating dictionary file");
-    crawler.words().into_iter().for_each(|(k, _v)| {
-        let line = format!("{}\n", k);
+    extractor.words().iter().for_each(|(word, _v)| {
+        let line = format!("{}\n", word);
         file.write_all(line.as_bytes())
             .expect("Error writing to dictionary");
     });

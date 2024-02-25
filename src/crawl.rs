@@ -1,5 +1,4 @@
 use crate::error::Error;
-use crate::filter::FilterMode;
 use crate::site::SitePolicy;
 
 use async_recursion::async_recursion;
@@ -13,7 +12,7 @@ use std::time::Duration;
 pub struct Crawler {
     opts: CrawlOptions,
     links: HashMap<String, bool>,
-    words: HashMap<String, bool>,
+    docs: Vec<Html>,
     cur_depth: usize,
     client: Client,
     limiter: Ratelimiter,
@@ -24,9 +23,7 @@ impl Crawler {
     pub fn new(
         url: Url,
         depth: usize,
-        min_word_length: usize,
         req_per_sec: u64,
-        filters: Vec<FilterMode>,
         include_js: bool,
         include_css: bool,
         site: SitePolicy,
@@ -38,9 +35,7 @@ impl Crawler {
         Self::new_with_client(
             url,
             depth,
-            min_word_length,
             req_per_sec,
-            filters,
             include_js,
             include_css,
             site,
@@ -52,9 +47,7 @@ impl Crawler {
     pub fn new_with_client(
         url: Url,
         depth: usize,
-        min_word_length: usize,
         req_per_sec: u64,
-        filters: Vec<FilterMode>,
         include_js: bool,
         include_css: bool,
         site: SitePolicy,
@@ -66,17 +59,9 @@ impl Crawler {
             .initial_available(tokens / 2)
             .build()?;
         let mut crawler = Self {
-            opts: CrawlOptions::new(
-                url.clone(),
-                depth,
-                min_word_length,
-                filters,
-                include_js,
-                include_css,
-                site,
-            ),
+            opts: CrawlOptions::new(url.clone(), depth, include_js, include_css, site),
             links: HashMap::new(),
-            words: HashMap::new(),
+            docs: Vec::new(),
             cur_depth: 0,
             client,
             limiter,
@@ -90,9 +75,9 @@ impl Crawler {
         self.links.clone()
     }
 
-    /// Returns the gathered words.
-    pub fn words(&self) -> HashMap<String, bool> {
-        self.words.clone()
+    /// Returns the gathered documents.
+    pub fn docs(&self) -> Vec<Html> {
+        self.docs.clone()
     }
 
     /// Inserts and marks a link as visited.
@@ -109,7 +94,7 @@ impl Crawler {
     #[async_recursion(?Send)]
     pub async fn crawl(&mut self) -> () {
         self.cur_depth += 1;
-        for (url, visited) in self.links.clone().into_iter() {
+        for (url, visited) in self.links.clone().iter() {
             let result = Url::parse(url.as_str());
             if let Err(e) = result {
                 eprintln!("not a url: {}", e);
@@ -128,7 +113,7 @@ impl Crawler {
                 continue;
             }
 
-            if visited {
+            if *visited {
                 println!("already visited '{}', skipping", url);
                 continue;
             }
@@ -137,7 +122,7 @@ impl Crawler {
             self.visited(url.to_owned());
             let document = self.doc_from_url(String::from(url)).await;
             self.links_from_doc(&result.unwrap(), &document);
-            self.words_from_doc(&document);
+            self.docs.push(document);
         }
         if self.cur_depth < self.opts.depth() {
             println!("going deeper... current depth {}", self.cur_depth);
@@ -259,58 +244,6 @@ impl Crawler {
             }
         }
     }
-
-    /// Extract words from an html document.
-    fn words_from_doc(&mut self, document: &Html) -> () {
-        // note: alternatives to getting all text nodes (regardless if script/styel/etc. or not)
-        //for text in document.clone().root_element().text() { ...do something... }
-        for d in document.clone().root_element().descendants() {
-            if let Node::Text(text) = d.value() {
-                let parent_tag = d
-                    .parent()
-                    .unwrap()
-                    .value()
-                    .as_element()
-                    .unwrap()
-                    .name()
-                    .to_lowercase();
-                match parent_tag.as_str() {
-                    // if parent node is a script tag, means it should be js
-                    "script" => {
-                        if self.opts.include_js() {
-                            self.filter_text(&text.text);
-                        }
-                    }
-                    // if parent node is a style tag, means it should be css
-                    "style" => {
-                        if self.opts.include_css() {
-                            self.filter_text(&text.text);
-                        }
-                    }
-                    // if not ignored, send it
-                    _ => self.filter_text(&text.text),
-                }
-            }
-        }
-    }
-
-    fn filter_text(&mut self, text: &str) -> () {
-        let mut tmp = text.to_string();
-        tmp = tmp.to_lowercase();
-        // ignore these characters since we're looking for words
-        tmp = tmp.replace(|c: char| !c.is_alphanumeric(), " ");
-        if tmp.len() > 0 {
-            for w in tmp.split_whitespace() {
-                let mut fintext = w.to_string();
-                for filter in self.opts.filters() {
-                    fintext = filter.filter_str(&fintext);
-                }
-                if fintext.len() >= self.opts.min_word_length() {
-                    self.words.entry(String::from(fintext)).or_insert(true);
-                }
-            }
-        }
-    }
 }
 
 /// Options used when crawling and building wordlists.
@@ -320,10 +253,6 @@ struct CrawlOptions {
     url: Url,
     /// Limit the depth of crawling links.
     depth: usize,
-    /// Only save words greater than or equal to this value.
-    min_word_length: usize,
-    /// Filter strategy for words; multiple can be specified.
-    filters: Vec<FilterMode>,
     /// Include javascript from html pages.
     include_js: bool,
     /// Include css from html pages.
@@ -334,20 +263,10 @@ struct CrawlOptions {
 
 impl CrawlOptions {
     /// Returns a new CrawlOptions instance.
-    fn new(
-        url: Url,
-        depth: usize,
-        min_word_length: usize,
-        filters: Vec<FilterMode>,
-        include_js: bool,
-        include_css: bool,
-        site: SitePolicy,
-    ) -> Self {
+    fn new(url: Url, depth: usize, include_js: bool, include_css: bool, site: SitePolicy) -> Self {
         Self {
             url,
             depth,
-            min_word_length,
-            filters,
             include_js,
             include_css,
             site,
@@ -362,16 +281,6 @@ impl CrawlOptions {
     /// Returns the link search depth used for crawling.
     fn depth(&self) -> usize {
         self.depth
-    }
-
-    /// Returns the minimum word length for saving words to the wordslist.
-    fn min_word_length(&self) -> usize {
-        self.min_word_length
-    }
-
-    /// Returns the configured filter mode for discovered words.
-    fn filters(&self) -> Vec<FilterMode> {
-        self.filters.clone()
     }
 
     /// Returns whether or not configuration dictates  to include js.
