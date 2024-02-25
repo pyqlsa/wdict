@@ -66,7 +66,7 @@ Options:
 
           [default: 20]
 
-  -f, --file <FILE>
+  -o, --output <OUTPUT>
           File to write dictionary to (will be overwritten if it already exists)
 
           [default: wdict.txt]

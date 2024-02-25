@@ -24,7 +24,7 @@ struct Cli {
     req_per_sec: u64,
     /// File to write dictionary to (will be overwritten if it already exists).
     #[arg(short, long, default_value = "wdict.txt")]
-    file: String,
+    output: String,
     /// Filter strategy for words; multiple can be specified (comma separated).
     #[arg(
         long,
@@ -233,8 +233,8 @@ async fn main() -> Result<(), Error> {
     let len_words = crawler.words().len();
     println!("unique words: {}", len_words);
 
-    println!("writing dictionary to file: {}", args.file);
-    let mut file = File::create(args.file).expect("Error creating dictionary file");
+    println!("writing dictionary to file: {}", args.output);
+    let mut file = File::create(args.output).expect("Error creating dictionary file");
     crawler.words().into_iter().for_each(|(k, _v)| {
         let line = format!("{}\n", k);
         file.write_all(line.as_bytes())
