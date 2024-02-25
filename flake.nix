@@ -10,25 +10,33 @@
       url = "github:nmattia/naersk";
       inputs.nixpkgs.follows = "nixpkgs";
     };
-    flake-utils = {
-      url = "github:numtide/flake-utils";
-    };
   };
 
   outputs =
     { self
     , nixpkgs
     , naersk
-    , flake-utils
     , ...
     }:
-    flake-utils.lib.eachDefaultSystem (system:
     let
       cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
-      pkgs = import nixpkgs {
-        inherit system;
-        overlays = [ self.overlays.${system}.default ];
-      };
+
+      # https://ayats.org/blog/no-flake-utils/
+      forSystems = func:
+        nixpkgs.lib.genAttrs [
+          "x86_64-linux"
+          "aarch64-linux"
+          "x86_64-darwin"
+          "aarch64-darwin"
+        ]
+          (system: func (import nixpkgs {
+            inherit system;
+            config.allowUnfree = true;
+            overlays = [
+              self.overlays.default
+            ];
+          }));
+
     in
     {
       overlays = {
@@ -37,26 +45,27 @@
         };
       };
 
-      packages = {
+      packages = forSystems (pkgs: {
         default = pkgs."${cargoToml.package.name}";
-      };
+        "${cargoToml.package.name}" = pkgs."${cargoToml.package.name}";
+      });
 
-      apps = {
+      apps = forSystems (pkgs: {
         default = {
           type = "app";
           program = "${pkgs."${cargoToml.package.name}"}/bin/${cargoToml.package.name}";
         };
-      };
+      });
 
-      devShells = {
+      devShells = forSystems (pkgs: {
         default = pkgs.mkShell {
           inputsFrom = [ pkgs."${cargoToml.package.name}" ];
           buildInputs = with pkgs; [ rustfmt nixpkgs-fmt ];
           LIBCLANG_PATH = "${pkgs.llvmPackages.libclang.lib}/lib";
         };
-      };
+      });
 
-      checks = {
+      checks = forSystems (pkgs: {
         format = pkgs.runCommand "check-format"
           {
             buildInputs = with pkgs; [ rustfmt cargo ];
@@ -66,6 +75,6 @@
           touch $out # it worked!
         '';
         "${cargoToml.package.name}" = pkgs."${cargoToml.package.name}";
-      };
-    });
+      });
+    };
 }
