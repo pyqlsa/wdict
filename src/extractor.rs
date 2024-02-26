@@ -4,7 +4,7 @@ use crate::filter::FilterMode;
 use scraper::{node::Node, Html};
 use std::collections::HashMap;
 
-/// Crawls websites, gathering links and words from pages.
+/// Extracts words from html documents.
 pub struct Extractor {
     opts: ExtractOptions,
     words: HashMap<String, bool>,

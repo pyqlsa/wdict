@@ -52,7 +52,7 @@ Options:
           - bebop:     Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>
 
   -d, --depth <DEPTH>
-          Limit the depth of crawling links
+          Limit the depth of crawling urls
 
           [default: 1]
 
@@ -70,6 +70,9 @@ Options:
           File to write dictionary to (will be overwritten if it already exists)
 
           [default: wdict.txt]
+
+      --output-urls <OUTPUT_URLS>
+          File to write urls to (will be overwritten if it already exists)
 
       --filters <FILTERS>...
           Filter strategy for words; multiple can be specified (comma separated)
@@ -90,20 +93,20 @@ Options:
           - none:         Leave the word as-is
 
   -j, --inclue-js
-          Include javascript from <script> tags and links
+          Include javascript from <script> tags and urls
 
   -c, --inclue-css
-          Include CSS from <style> tags links
+          Include CSS from <style> tags urls
 
       --site-policy <SITE_POLICY>
-          Site policy for discovered links
+          Site policy for discovered urls
 
           [default: same]
 
           Possible values:
-          - same:      Allow crawling links, only if the domain exactly matches
-          - subdomain: Allow crawling links if they are the same domain or subdomains
-          - all:       Allow crawling all links, regardless of domain
+          - same:      Allow crawling urls, only if the domain exactly matches
+          - subdomain: Allow crawling urls if they are the same domain or subdomains
+          - all:       Allow crawling all urls, regardless of domain
 
   -h, --help
           Print help (see a summary with '-h')

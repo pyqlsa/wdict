@@ -4,8 +4,10 @@ use clap::{Args, Parser, ValueEnum};
 use reqwest::Url;
 use std::fs::File;
 use std::io::Write;
+use tokio::signal;
+use tokio::sync::broadcast;
 
-use wdict::{Crawler, Error, Extractor, FilterMode, SitePolicy};
+use wdict::{Crawler, Error, Extractor, FilterMode, Shutdown, SitePolicy};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -13,7 +15,7 @@ struct Cli {
     /// URL to start crawling from.
     #[command(flatten)]
     site: Site,
-    /// Limit the depth of crawling links.
+    /// Limit the depth of crawling urls.
     #[arg(short, long, default_value_t = 1)]
     depth: usize,
     /// Only save words greater than or equal to this value.
@@ -23,8 +25,11 @@ struct Cli {
     #[arg(short, long, default_value_t = 20)]
     req_per_sec: u64,
     /// File to write dictionary to (will be overwritten if it already exists).
-    #[arg(short, long, default_value = "wdict.txt")]
+    #[arg(short, long, default_value = "wdict.txt", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
     output: String,
+    /// File to write urls to (will be overwritten if it already exists).
+    #[arg(long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    output_urls: Option<String>,
     /// Filter strategy for words; multiple can be specified (comma separated).
     #[arg(
         long,
@@ -34,13 +39,13 @@ struct Cli {
         value_delimiter = ',',
     )]
     filters: Vec<FilterArg>,
-    /// Include javascript from <script> tags and links.
+    /// Include javascript from <script> tags and urls.
     #[arg(short = 'j', long, default_value_t = false)]
     inclue_js: bool,
-    /// Include CSS from <style> tags links.
+    /// Include CSS from <style> tags urls.
     #[arg(short = 'c', long, default_value_t = false)]
     inclue_css: bool,
-    /// Site policy for discovered links.
+    /// Site policy for discovered urls.
     #[arg(long, default_value = "same", value_enum)]
     site_policy: SitePolicyArg,
 }
@@ -49,12 +54,20 @@ struct Cli {
 #[group(required = true, multiple = false)]
 struct Site {
     /// URL to start crawling from.
-    #[arg(short, long)]
+    #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
     url: Option<String>,
     /// Pre-canned theme URLs to start crawling from (for fun, demoing features, and sparking new
     /// ideas).
     #[arg(long, value_enum)]
     theme: Option<Theme>,
+}
+
+fn str_not_whitespace(value: &str) -> Result<String, Error> {
+    if value.len() < 1 || value.trim().len() != value.len() {
+        Err(Error::StrParseError)
+    } else {
+        Ok(value.to_string())
+    }
 }
 
 // Need to wait on https://github.com/clap-rs/clap/issues/2639 before using macros in doc comments
@@ -167,11 +180,11 @@ fn to_modes(v: Vec<FilterArg>) -> Vec<FilterMode> {
 /// Defines options for crawling sites.
 #[derive(ValueEnum, Copy, Debug, Clone)]
 enum SitePolicyArg {
-    /// Allow crawling links, only if the domain exactly matches.
+    /// Allow crawling urls, only if the domain exactly matches.
     Same,
-    /// Allow crawling links if they are the same domain or subdomains.
+    /// Allow crawling urls if they are the same domain or subdomains.
     Subdomain,
-    /// Allow crawling all links, regardless of domain.
+    /// Allow crawling all urls, regardless of domain.
     All,
 }
 
@@ -201,6 +214,8 @@ async fn main() -> Result<(), Error> {
         }
     };
 
+    let (notify_shutdown, _) = broadcast::channel(1);
+
     let mut crawler = Crawler::new(
         url,
         args.depth,
@@ -208,25 +223,22 @@ async fn main() -> Result<(), Error> {
         args.inclue_js,
         args.inclue_css,
         args.site_policy.to_mode(),
+        Shutdown::new(notify_shutdown.subscribe()),
     )?;
 
-    crawler.crawl().await;
-
-    let len_links = crawler.links().len();
-    println!("visited links:");
-    crawler.links().iter().for_each(|(url, visited)| {
-        if *visited {
-            println!("- {}", url)
+    tokio::select! {
+        res = crawler.crawl() => {
+            if let Err(err) = res {
+                eprintln!("unexpected error while crawling {}", err);
+            }
         }
-    });
-    println!("links discovered but not visited:");
-    crawler.links().iter().for_each(|(url, visited)| {
-        if !*visited {
-            println!("- {}", url)
+        _ = signal::ctrl_c() => {
+            println!("shutting down...");
         }
-    });
-    println!("total unique links discovered: {}", len_links);
-    println!();
+    }
+    // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
+    // receive the shutdown signal and can exit
+    drop(notify_shutdown);
 
     let mut extractor = Extractor::new(
         args.min_word_length,
@@ -241,13 +253,34 @@ async fn main() -> Result<(), Error> {
 
     let len_words = extractor.words().len();
     println!("unique words: {}", len_words);
+    println!(
+        "visited pages: {}",
+        crawler.urls().values().filter(|v| **v).count()
+    );
 
-    println!("writing dictionary to file: {}", args.output);
-    let mut file = File::create(args.output).expect("Error creating dictionary file");
+    let mut file = File::create(args.output.clone()).expect("Error creating dictionary file");
     extractor.words().iter().for_each(|(word, _v)| {
         let line = format!("{}\n", word);
         file.write_all(line.as_bytes())
             .expect("Error writing to dictionary");
     });
+    println!("dictionary written to: {}", args.output);
+
+    if let Some(url_file) = args.output_urls {
+        let mut file = File::create(url_file.clone()).expect("Error creating urls file");
+        // filter for only visited urls
+        crawler
+            .urls()
+            .iter()
+            .filter(|(_k, v)| **v)
+            .for_each(|(url, _v)| {
+                let line = format!("{}\n", url);
+                file.write_all(line.as_bytes())
+                    .expect("Error writing to urls file");
+            });
+        println!("urls written to file: {}", url_file);
+    }
+    println!();
+
     Ok(())
 }

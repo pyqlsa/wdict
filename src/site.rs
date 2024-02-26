@@ -3,11 +3,11 @@ use reqwest::Url;
 /// Defines options for crawling sites.
 #[derive(Copy, Debug, Clone)]
 pub enum SitePolicy {
-    /// Allow crawling links, only if the domain exactly matches.
+    /// Allow crawling urls, only if the domain exactly matches.
     Same,
-    /// Allow crawling links if they are the same domain or subdomains.
+    /// Allow crawling urls if they are the same domain or subdomains.
     Subdomain,
-    /// Allow crawling all links, regardless of domain.
+    /// Allow crawling all urls, regardless of domain.
     All,
 }
 

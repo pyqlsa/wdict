@@ -1,4 +1,5 @@
 use crate::error::Error;
+use crate::shutdown::Shutdown;
 use crate::site::SitePolicy;
 
 use async_recursion::async_recursion;
@@ -8,14 +9,18 @@ use scraper::{node::Element, node::Node, Html};
 use std::collections::HashMap;
 use std::time::Duration;
 
-/// Crawls websites, gathering links and words from pages.
+/// Crawls websites, gathering urls from pages.
 pub struct Crawler {
     opts: CrawlOptions,
-    links: HashMap<String, bool>,
+    urls: HashMap<String, bool>,
     docs: Vec<Html>,
     cur_depth: usize,
     client: Client,
     limiter: Ratelimiter,
+    /// Listen for shutdown notifications.
+    ///
+    /// A wrapper around the `broadcast::Receiver` to be paired with a sender.
+    shutdown: Shutdown,
 }
 
 impl Crawler {
@@ -27,6 +32,7 @@ impl Crawler {
         include_js: bool,
         include_css: bool,
         site: SitePolicy,
+        shutdown: Shutdown,
     ) -> Result<Self, Error> {
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
@@ -40,6 +46,7 @@ impl Crawler {
             include_css,
             site,
             client,
+            shutdown,
         )
     }
 
@@ -52,6 +59,7 @@ impl Crawler {
         include_css: bool,
         site: SitePolicy,
         client: Client,
+        shutdown: Shutdown,
     ) -> Result<Self, Error> {
         let tokens = if req_per_sec < 1 { 1 } else { req_per_sec };
         let limiter = Ratelimiter::builder(tokens, Duration::from_secs(1))
@@ -60,19 +68,20 @@ impl Crawler {
             .build()?;
         let mut crawler = Self {
             opts: CrawlOptions::new(url.clone(), depth, include_js, include_css, site),
-            links: HashMap::new(),
+            urls: HashMap::new(),
             docs: Vec::new(),
             cur_depth: 0,
             client,
             limiter,
+            shutdown,
         };
-        crawler.to_be_visited(String::from(url));
+        crawler.mark_to_be_visited(String::from(url));
         Ok(crawler)
     }
 
-    /// Returns the crawled links.
-    pub fn links(&self) -> HashMap<String, bool> {
-        self.links.clone()
+    /// Returns the crawled urls.
+    pub fn urls(&self) -> HashMap<String, bool> {
+        self.urls.clone()
     }
 
     /// Returns the gathered documents.
@@ -80,21 +89,24 @@ impl Crawler {
         self.docs.clone()
     }
 
-    /// Inserts and marks a link as visited.
-    pub fn visited(&mut self, url: String) -> () {
-        self.links.insert(url.to_owned(), true);
+    /// Inserts and marks a url as visited.
+    pub fn mark_visited(&mut self, url: String) -> () {
+        self.urls.insert(url.to_owned(), true);
     }
 
-    /// Inserts and marks a link as not yet visited.
-    pub fn to_be_visited(&mut self, url: String) -> () {
-        self.links.insert(url.to_owned(), false);
+    /// Inserts and marks a url as not yet visited.
+    pub fn mark_to_be_visited(&mut self, url: String) -> () {
+        self.urls.insert(url.to_owned(), false);
     }
 
-    /// Crawl links up to a given limit, scraping links and words from pages.
+    /// Crawl urls up to a given limit, scraping urls and words from pages.
     #[async_recursion(?Send)]
-    pub async fn crawl(&mut self) -> () {
+    pub async fn crawl(&mut self) -> Result<(), Error> {
         self.cur_depth += 1;
-        for (url, visited) in self.links.clone().iter() {
+        for (url, visited) in self.urls.clone().iter() {
+            if self.shutdown.is_shutdown() {
+                break;
+            }
             let result = Url::parse(url.as_str());
             if let Err(e) = result {
                 eprintln!("not a url: {}", e);
@@ -119,21 +131,25 @@ impl Crawler {
             }
 
             println!("visiting {}", url);
-            self.visited(url.to_owned());
+            self.mark_visited(url.to_owned());
             let document = self.doc_from_url(String::from(url)).await;
-            self.links_from_doc(&result.unwrap(), &document);
+            self.urls_from_doc(&result.unwrap(), &document);
             self.docs.push(document);
         }
         if self.cur_depth < self.opts.depth() {
             println!("going deeper... current depth {}", self.cur_depth);
-            self.crawl().await;
+            let _ = self.crawl().await; // safe to ignore result/error
         }
+        Ok(())
     }
 
     /// Get an html document from the provided url.
     async fn doc_from_url(&self, url: String) -> Html {
         // TODO: do this smarter?
         for _ in 0..10 {
+            if self.shutdown.is_shutdown() {
+                return Html::new_document();
+            }
             if let Err(sleep) = self.limiter.try_wait() {
                 std::thread::sleep(sleep);
                 continue;
@@ -174,13 +190,13 @@ impl Crawler {
         }
     }
 
-    /// Extract links from an html document.
-    fn links_from_doc(&mut self, url: &Url, document: &Html) -> () {
-        // breadcrumbs for using selector to extract links from elements...
+    /// Extract urls from an html document.
+    fn urls_from_doc(&mut self, url: &Url, document: &Html) -> () {
+        // breadcrumbs for using selector to extract urls from elements...
         //let link_selector = Selector::parse(r#"a[href^="http"]"#).unwrap();
         //
         //for elem in document.clone().select(&link_selector) {
-        //    self.links
+        //    self.urls
         //        .entry(String::from(elem.value().attr("href").unwrap()))
         //        .or_insert(false);
         //}
@@ -193,7 +209,7 @@ impl Crawler {
                             Err(_e) => {
                                 // likely a relative url
                                 if href.starts_with('#') {
-                                    // ignore anchor links
+                                    // ignore anchor urls
                                     continue;
                                 }
                                 if let Ok(base_url) =
@@ -201,7 +217,7 @@ impl Crawler {
                                 {
                                     if let Ok(joined_url) = base_url.join(href) {
                                         let final_url = String::from(joined_url.as_str());
-                                        self.conditional_insert_link(final_url, elem)
+                                        self.conditional_insert_url(final_url, elem)
                                     } else {
                                         // errors along the way, skipping href
                                         continue;
@@ -214,7 +230,7 @@ impl Crawler {
                             Ok(u) => {
                                 // must be a valid full url
                                 let final_url = String::from(u.as_str());
-                                self.conditional_insert_link(final_url, elem)
+                                self.conditional_insert_url(final_url, elem)
                             }
                         }
                     }
@@ -226,19 +242,19 @@ impl Crawler {
     /// Conditionally save the given url if it adheres to configured options,
     /// determined by the given element; given element is intended to be the
     /// element from which  the url was extracted from.
-    fn conditional_insert_link(&mut self, url: String, elem: &Element) -> () {
+    fn conditional_insert_url(&mut self, url: String, elem: &Element) -> () {
         if url.as_str() != "" {
             match elem.name() {
                 "link" => {
                     if self.opts.include_css() && elem.attr("rel").unwrap() == "stylesheet" {
-                        self.links.entry(url.clone()).or_insert(false);
+                        self.urls.entry(url.clone()).or_insert(false);
                     }
                     if self.opts.include_js() && elem.attr("as").unwrap() == "script" {
-                        self.links.entry(url.clone()).or_insert(false);
+                        self.urls.entry(url.clone()).or_insert(false);
                     }
                 }
                 "a" => {
-                    self.links.entry(url.clone()).or_insert(false);
+                    self.urls.entry(url.clone()).or_insert(false);
                 }
                 _ => {}
             }
@@ -251,13 +267,13 @@ impl Crawler {
 struct CrawlOptions {
     /// Url to start crawling from.
     url: Url,
-    /// Limit the depth of crawling links.
+    /// Limit the depth of crawling urls.
     depth: usize,
     /// Include javascript from html pages.
     include_js: bool,
     /// Include css from html pages.
     include_css: bool,
-    /// Strategy for link crawling.
+    /// Strategy for url crawling.
     site: SitePolicy,
 }
 
@@ -278,7 +294,7 @@ impl CrawlOptions {
         self.url.clone()
     }
 
-    /// Returns the link search depth used for crawling.
+    /// Returns the url search depth used for crawling.
     fn depth(&self) -> usize {
         self.depth
     }

@@ -1661,7 +1661,7 @@ checksum = "4f186bd2dcf04330886ce82d6f33dd75a7bfcf69ecf5763b89fcde53b6ac9838"
 
 [[package]]
 name = "wdict"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "async-recursion",
  "clap",
