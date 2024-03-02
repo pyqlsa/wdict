@@ -99,6 +99,21 @@ macro_rules! bebop_url {
         "https://cowboybebop.fandom.com/wiki/Cowboy_Bebop"
     };
 }
+macro_rules! greek_url {
+    () => {
+        "https://www.theoi.com"
+    };
+}
+macro_rules! greco_roman_url {
+    () => {
+        "https://www.gutenberg.org/files/22381/22381-h/22381-h.htm"
+    };
+}
+macro_rules! lovecraft_url {
+    () => {
+        "https://www.hplovecraft.com"
+    };
+}
 
 #[derive(ValueEnum, Copy, Debug, Clone)]
 enum Theme {
@@ -112,6 +127,12 @@ enum Theme {
     Pokemon,
     /// Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>.
     Bebop,
+    /// Greek Mythology themed URL <https://www.theoi.com>.
+    Greek,
+    /// Greek and Roman Mythology themed URL <https://www.gutenberg.org/files/22381/22381-h/22381-h.htm>.
+    GrecoRoman,
+    /// H.P. Lovecraft themed URL <https://www.hplovecraft.com>.
+    Lovecraft,
 }
 
 impl Theme {
@@ -123,6 +144,9 @@ impl Theme {
             Self::Witcher => witcher_url!(),
             Self::Pokemon => pokemon_url!(),
             Self::Bebop => bebop_url!(),
+            Self::Greek => greek_url!(),
+            Self::GrecoRoman => greco_roman_url!(),
+            Self::Lovecraft => lovecraft_url!(),
         }
     }
 }
@@ -184,6 +208,8 @@ enum SitePolicyArg {
     Same,
     /// Allow crawling urls if they are the same domain or subdomains.
     Subdomain,
+    /// Allow crawling urls if they are the same domain or a sibling.
+    Sibling,
     /// Allow crawling all urls, regardless of domain.
     All,
 }
@@ -194,6 +220,7 @@ impl SitePolicyArg {
         match self {
             Self::Same => SitePolicy::Same,
             Self::Subdomain => SitePolicy::Subdomain,
+            Self::Sibling => SitePolicy::Sibling,
             Self::All => SitePolicy::All,
         }
     }

@@ -45,11 +45,14 @@ Options:
           Pre-canned theme URLs to start crawling from (for fun, demoing features, and sparking new ideas)
 
           Possible values:
-          - star-wars: Star Wars themed URL <https://www.starwars.com/databank>
-          - tolkien:   Tolkien themed URL <https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html>
-          - witcher:   Witcher themed URL <https://witcher.fandom.com/wiki/Elder_Speech>
-          - pokemon:   Pokemon themed URL <https://www.smogon.com>
-          - bebop:     Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>
+          - star-wars:   Star Wars themed URL <https://www.starwars.com/databank>
+          - tolkien:     Tolkien themed URL <https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html>
+          - witcher:     Witcher themed URL <https://witcher.fandom.com/wiki/Elder_Speech>
+          - pokemon:     Pokemon themed URL <https://www.smogon.com>
+          - bebop:       Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>
+          - greek:       Greek Mythology themed URL <https://www.theoi.com>
+          - greco-roman: Greek and Roman Mythology themed URL <https://www.gutenberg.org/files/22381/22381-h/22381-h.htm>
+          - lovecraft:   H.P. Lovecraft themed URL <https://www.hplovecraft.com>
 
   -d, --depth <DEPTH>
           Limit the depth of crawling urls
@@ -106,6 +109,7 @@ Options:
           Possible values:
           - same:      Allow crawling urls, only if the domain exactly matches
           - subdomain: Allow crawling urls if they are the same domain or subdomains
+          - sibling:   Allow crawling urls if they are the same domain or a sibling
           - all:       Allow crawling all urls, regardless of domain
 
   -h, --help

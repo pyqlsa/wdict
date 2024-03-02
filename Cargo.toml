@@ -15,6 +15,7 @@ async-recursion = { version = "1.0.5" }
 clap = { version = "4.5.1", features = ["derive"] }
 decancer = { version = "2.0.2" }
 deunicode = { version = "1.4.3" }
+psl = { version = "2.1.25" }
 ratelimit = { version = "0.9.0" }
 reqwest = { version = "0.11.24" }
 scraper = { version = "0.18.1" }
