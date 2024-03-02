@@ -74,8 +74,13 @@ Options:
 
           [default: wdict.txt]
 
-      --output-urls <OUTPUT_URLS>
-          File to write urls to (will be overwritten if it already exists)
+      --output-urls
+          Write discovered urls to a file
+
+      --output-urls-file <OUTPUT_URLS_FILE>
+          File to write urls to, json formatted (will be overwritten if it already exists)
+
+          [default: urls.json]
 
       --filters <FILTERS>...
           Filter strategy for words; multiple can be specified (comma separated)
@@ -129,8 +134,7 @@ A list of ideas for future work:
  - archive mode to crawl and save pages locally
  - build dictionaries from local (archived) pages
  - support different mime types
- - more word filtering options
- - better async
+ - better async?
 
 ## License
 

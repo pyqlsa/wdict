@@ -84,6 +84,24 @@ impl Crawler {
         self.urls.clone()
     }
 
+    /// Returns the urls that were visited.
+    pub fn visited_urls(&self) -> Vec<String> {
+        self.urls()
+            .into_iter()
+            .filter(|(_k, v)| *v)
+            .map(|(k, _v)| k)
+            .collect()
+    }
+
+    /// Returns the urls that were discovered, but not visited.
+    pub fn not_visited_urls(&self) -> Vec<String> {
+        self.urls()
+            .into_iter()
+            .filter(|(_k, v)| !*v)
+            .map(|(k, _v)| k)
+            .collect()
+    }
+
     /// Returns the gathered documents.
     pub fn docs(&self) -> Vec<Html> {
         self.docs.clone()

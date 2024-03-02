@@ -2,6 +2,8 @@
 //!
 use clap::{Args, Parser, ValueEnum};
 use reqwest::Url;
+use serde::{Deserialize, Serialize};
+use serde_json;
 use std::fs::File;
 use std::io::Write;
 use tokio::signal;
@@ -27,9 +29,12 @@ struct Cli {
     /// File to write dictionary to (will be overwritten if it already exists).
     #[arg(short, long, default_value = "wdict.txt", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
     output: String,
-    /// File to write urls to (will be overwritten if it already exists).
-    #[arg(long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    output_urls: Option<String>,
+    /// Write discovered urls to a file.
+    #[arg(long, default_value_t = false)]
+    output_urls: bool,
+    /// File to write urls to, json formatted (will be overwritten if it already exists).
+    #[arg(long, default_value = "urls.json", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    output_urls_file: String,
     /// Filter strategy for words; multiple can be specified (comma separated).
     #[arg(
         long,
@@ -226,6 +231,13 @@ impl SitePolicyArg {
     }
 }
 
+/// Helper for json output url file.
+#[derive(Serialize, Deserialize, Debug)]
+struct OutputUrls {
+    visited: Vec<String>,
+    not_visited: Vec<String>,
+}
+
 /// Main function.
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -293,19 +305,20 @@ async fn main() -> Result<(), Error> {
     });
     println!("dictionary written to: {}", args.output);
 
-    if let Some(url_file) = args.output_urls {
-        let mut file = File::create(url_file.clone()).expect("Error creating urls file");
-        // filter for only visited urls
-        crawler
-            .urls()
-            .iter()
-            .filter(|(_k, v)| **v)
-            .for_each(|(url, _v)| {
-                let line = format!("{}\n", url);
-                file.write_all(line.as_bytes())
-                    .expect("Error writing to urls file");
-            });
-        println!("urls written to file: {}", url_file);
+    if args.output_urls {
+        let out_urls = OutputUrls {
+            visited: crawler.visited_urls(),
+            not_visited: crawler.not_visited_urls(),
+        };
+        let url_file = args.output_urls_file;
+        if let Ok(j) = serde_json::to_string_pretty(&out_urls) {
+            let mut file = File::create(url_file.clone()).expect("Error creating urls file");
+            file.write_all(j.as_bytes())
+                .expect("Error writing urls to file");
+            println!("urls written to file: {}", url_file);
+        } else {
+            eprintln!("Error serializing output urls json")
+        }
     }
     println!();
 
