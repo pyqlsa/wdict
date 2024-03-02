@@ -1,4 +1,4 @@
-use decancer::cure;
+use decancer;
 use deunicode::deunicode;
 
 /// Defines a way to filter strings when building wordlists.
@@ -52,7 +52,9 @@ impl FilterMode {
 }
 
 fn filter_decancer(s: &str) -> String {
-    let out = cure(s);
+    // using macro w/ default options instead of cure function;
+    // consider cure options: https://docs.rs/decancer/latest/decancer/struct.Options.html
+    let out = decancer::cure!(s);
     match out {
         Ok(o) => o.to_string(),
         Err(..) => "".to_string(),
