@@ -9,7 +9,7 @@ use std::io::Write;
 use tokio::signal;
 use tokio::sync::broadcast;
 
-use wdict::{Crawler, Error, Extractor, FilterMode, Shutdown, SitePolicy};
+use wdict::{CrawlOptions, Crawler, Error, Extractor, FilterMode, Shutdown, SitePolicy};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -69,7 +69,7 @@ struct Site {
 
 fn str_not_whitespace(value: &str) -> Result<String, Error> {
     if value.len() < 1 || value.trim().len() != value.len() {
-        Err(Error::StrParseError)
+        Err(Error::StrWhitespaceError)
     } else {
         Ok(value.to_string())
     }
@@ -254,16 +254,16 @@ async fn main() -> Result<(), Error> {
     };
 
     let (notify_shutdown, _) = broadcast::channel(1);
-
-    let mut crawler = Crawler::new(
+    let copts = CrawlOptions::new(
         url,
         args.depth,
         args.req_per_sec,
         args.inclue_js,
         args.inclue_css,
         args.site_policy.to_mode(),
-        Shutdown::new(notify_shutdown.subscribe()),
-    )?;
+    );
+
+    let mut crawler = Crawler::new(copts, Shutdown::new(notify_shutdown.subscribe()))?;
 
     tokio::select! {
         res = crawler.crawl() => {

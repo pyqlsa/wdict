@@ -25,49 +25,32 @@ pub struct Crawler {
 
 impl Crawler {
     /// Returns a new Crawler instance with the default `reqwest::Client`.
-    pub fn new(
-        url: Url,
-        depth: usize,
-        req_per_sec: u64,
-        include_js: bool,
-        include_css: bool,
-        site: SitePolicy,
-        shutdown: Shutdown,
-    ) -> Result<Self, Error> {
+    pub fn new(opts: CrawlOptions, shutdown: Shutdown) -> Result<Self, Error> {
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
-        Self::new_with_client(
-            url,
-            depth,
-            req_per_sec,
-            include_js,
-            include_css,
-            site,
-            client,
-            shutdown,
-        )
+        Self::new_with_client(opts, client, shutdown)
     }
 
     /// Returns a new Crawler instance with the provided `reqwest::Client`.
     pub fn new_with_client(
-        url: Url,
-        depth: usize,
-        req_per_sec: u64,
-        include_js: bool,
-        include_css: bool,
-        site: SitePolicy,
+        opts: CrawlOptions,
         client: Client,
         shutdown: Shutdown,
     ) -> Result<Self, Error> {
-        let tokens = if req_per_sec < 1 { 1 } else { req_per_sec };
+        let tokens = if opts.requests_per_second() < 1 {
+            1
+        } else {
+            opts.requests_per_second()
+        };
         let limiter = Ratelimiter::builder(tokens, Duration::from_secs(1))
             .max_tokens(tokens)
             .initial_available(tokens / 2)
             .build()?;
+        let start_url = opts.url.clone();
         let mut crawler = Self {
-            opts: CrawlOptions::new(url.clone(), depth, include_js, include_css, site),
+            opts,
             urls: HashMap::new(),
             docs: Vec::new(),
             cur_depth: 0,
@@ -75,7 +58,7 @@ impl Crawler {
             limiter,
             shutdown,
         };
-        crawler.mark_to_be_visited(String::from(url));
+        crawler.mark_to_be_visited(String::from(start_url));
         Ok(crawler)
     }
 
@@ -151,8 +134,13 @@ impl Crawler {
             println!("visiting {}", url);
             self.mark_visited(url.to_owned());
             let document = self.doc_from_url(String::from(url)).await;
-            self.urls_from_doc(&result.unwrap(), &document);
-            self.docs.push(document);
+            match document {
+                Ok(doc) => {
+                    self.urls_from_doc(&result.unwrap(), &doc);
+                    self.docs.push(doc);
+                }
+                Err(e) => eprintln!("{}", e),
+            }
         }
         if self.cur_depth < self.opts.depth() {
             println!("going deeper... current depth {}", self.cur_depth);
@@ -162,11 +150,11 @@ impl Crawler {
     }
 
     /// Get an html document from the provided url.
-    async fn doc_from_url(&self, url: String) -> Html {
+    async fn doc_from_url(&self, url: String) -> Result<Html, Error> {
         // TODO: do this smarter?
         for _ in 0..10 {
             if self.shutdown.is_shutdown() {
-                return Html::new_document();
+                return Err(Error::EarlyTerminationError);
             }
             if let Err(sleep) = self.limiter.try_wait() {
                 std::thread::sleep(sleep);
@@ -196,14 +184,12 @@ impl Crawler {
                 } else {
                     eprintln!("unexpected error: {}", e);
                 }
-
-                // Return empty doc, as there's nothing to parse.
-                Html::new_document()
+                Err(Error::Request { why: e })
             }
             Ok(res) => {
                 let doc_text = res.text().await.unwrap();
 
-                Html::parse_document(&doc_text)
+                Ok(Html::parse_document(&doc_text))
             }
         }
     }
@@ -221,37 +207,38 @@ impl Crawler {
         for d in document.clone().root_element().descendants() {
             if let Node::Element(elem) = d.value() {
                 if let Some(href) = elem.attr("href") {
-                    if href != "" {
-                        let result = Url::parse(href);
-                        match result {
-                            Err(_e) => {
-                                // likely a relative url
-                                if href.starts_with('#') {
-                                    // ignore anchor urls
-                                    continue;
-                                }
-                                if let Ok(base_url) =
-                                    Url::parse(url.origin().unicode_serialization().as_str())
-                                {
-                                    if let Ok(joined_url) = base_url.join(href) {
-                                        let final_url = String::from(joined_url.as_str());
-                                        self.conditional_insert_url(final_url, elem)
-                                    } else {
-                                        // errors along the way, skipping href
-                                        continue;
-                                    }
-                                } else {
-                                    // errors along the way, skipping href
-                                    continue;
-                                }
-                            }
-                            Ok(u) => {
-                                // must be a valid full url
-                                let final_url = String::from(u.as_str());
-                                self.conditional_insert_url(final_url, elem)
-                            }
-                        }
+                    let final_url = Self::url_from_href(url, href);
+                    match final_url {
+                        Err(_e) => continue, // just skip href;
+                        Ok(u) => self.conditional_insert_url(u, elem),
                     }
+                }
+            }
+        }
+    }
+
+    /// Based on a page's original url, return a url based on the given href extracted from the
+    /// page.
+    fn url_from_href(url: &Url, href: &str) -> Result<String, Error> {
+        if href == "" || href.starts_with('#') {
+            // ignore whitespace and anchors; probably need a better error for this, but it's
+            // generally ignored anyways
+            return Err(Error::StrWhitespaceError);
+        }
+        let result = Url::parse(href);
+        match result {
+            Ok(u) => {
+                // must be a valid full url
+                return Ok(String::from(u.as_str()));
+            }
+            // TODO: this section could be tidied for clarity, but errors are generally ignored
+            // from this function anyways
+            Err(e) => {
+                // likely a relative url
+                if let Ok(joined_url) = url.join(href) {
+                    return Ok(String::from(joined_url.as_str()));
+                } else {
+                    return Err(Error::UrlParsing { why: e });
                 }
             }
         }
@@ -282,7 +269,7 @@ impl Crawler {
 
 /// Options used when crawling and building wordlists.
 #[derive(Debug, Clone)]
-struct CrawlOptions {
+pub struct CrawlOptions {
     /// Url to start crawling from.
     url: Url,
     /// Limit the depth of crawling urls.
@@ -293,14 +280,24 @@ struct CrawlOptions {
     include_css: bool,
     /// Strategy for url crawling.
     site: SitePolicy,
+    /// Upper limit of requests per second while crawling.
+    req_per_sec: u64,
 }
 
 impl CrawlOptions {
     /// Returns a new CrawlOptions instance.
-    fn new(url: Url, depth: usize, include_js: bool, include_css: bool, site: SitePolicy) -> Self {
+    pub fn new(
+        url: Url,
+        depth: usize,
+        req_per_sec: u64,
+        include_js: bool,
+        include_css: bool,
+        site: SitePolicy,
+    ) -> Self {
         Self {
             url,
             depth,
+            req_per_sec,
             include_js,
             include_css,
             site,
@@ -308,27 +305,31 @@ impl CrawlOptions {
     }
 
     /// Returns the url where crawling initiated from.
-    fn url(&self) -> Url {
+    pub fn url(&self) -> Url {
         self.url.clone()
     }
 
     /// Returns the url search depth used for crawling.
-    fn depth(&self) -> usize {
+    pub fn depth(&self) -> usize {
         self.depth
     }
 
+    pub fn requests_per_second(&self) -> u64 {
+        self.req_per_sec
+    }
+
     /// Returns whether or not configuration dictates  to include js.
-    fn include_js(&self) -> bool {
+    pub fn include_js(&self) -> bool {
         self.include_js
     }
 
     /// Returns whether or not configuration dictates  to include css.
-    fn include_css(&self) -> bool {
+    pub fn include_css(&self) -> bool {
         self.include_css
     }
 
     /// Returns the configured site policy for visiting discovered URLs.
-    fn site(&self) -> SitePolicy {
+    pub fn site(&self) -> SitePolicy {
         self.site
     }
 }
