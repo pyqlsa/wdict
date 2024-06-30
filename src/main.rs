@@ -51,7 +51,7 @@ struct Cli {
     /// Include javascript from <script> tags and urls.
     #[arg(short = 'j', long, default_value_t = false)]
     inclue_js: bool,
-    /// Include CSS from <style> tags urls.
+    /// Include CSS from <style> tags and urls.
     #[arg(short = 'c', long, default_value_t = false)]
     inclue_css: bool,
     /// Site policy for discovered urls.
@@ -65,8 +65,7 @@ struct Site {
     /// URL to start crawling from.
     #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
     url: Option<String>,
-    /// Pre-canned theme URLs to start crawling from (for fun, demoing features, and sparking new
-    /// ideas).
+    /// Pre-canned theme URLs to start crawling from (for fun).
     #[arg(long, value_enum)]
     theme: Option<Theme>,
 }

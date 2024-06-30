@@ -42,7 +42,7 @@ Options:
           URL to start crawling from
 
       --theme <THEME>
-          Pre-canned theme URLs to start crawling from (for fun, demoing features, and sparking new ideas)
+          Pre-canned theme URLs to start crawling from (for fun)
 
           Possible values:
           - star-wars:   Star Wars themed URL <https://www.starwars.com/databank>
@@ -104,7 +104,7 @@ Options:
           Include javascript from <script> tags and urls
 
   -c, --inclue-css
-          Include CSS from <style> tags urls
+          Include CSS from <style> tags and urls
 
       --site-policy <SITE_POLICY>
           Site policy for discovered urls
