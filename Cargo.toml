@@ -2,7 +2,7 @@
 name = "wdict"
 authors = ["pyqlsa"]
 description = "Create dictionaries by scraping webpages."
-version = "0.1.12"
+version = "0.1.13"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -11,15 +11,14 @@ repository = "https://github.com/pyqlsa/wdict"
 include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock"]
 
 [dependencies]
-async-recursion = { version = "1.0.5" }
-clap = { version = "4.5.1", features = ["derive"] }
-decancer = { version = "3.0.1" }
-deunicode = { version = "1.4.3" }
-psl = { version = "2.1.25" }
-ratelimit = { version = "0.9.0" }
-reqwest = { version = "0.11.24" }
+clap = { version = "4.5.8", features = ["derive"] }
+decancer = { version = "3.2.2" }
+deunicode = { version = "1.6.0" }
+psl = { version = "2.1.49" }
+ratelimit = { version = "0.9.1" }
+reqwest = { version = "0.12.5" }
 scraper = { version = "0.19.0" }
-serde = { version = "1.0.197", features = ["derive"] }
-serde_json = { version = "1.0.114" }
-tokio = { version = "1.36.0", features = ["full"] }
-url = { version = "2.5.0" }
+serde = { version = "1.0.203", features = ["derive"] }
+serde_json = { version = "1.0.118" }
+tokio = { version = "1.38.0", features = ["full"] }
+url = { version = "2.5.2" }

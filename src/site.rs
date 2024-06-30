@@ -28,7 +28,7 @@ impl std::fmt::Display for SitePolicy {
 
 impl SitePolicy {
     /// Returns if the given url matches the site visiting policy.
-    pub fn matches_policy(&self, source_url: Url, target_url: Url) -> bool {
+    pub fn matches_policy(&self, source_url: &Url, target_url: &Url) -> bool {
         match self {
             Self::Same => {
                 if let Some(tu) = target_url.host_str() {
@@ -87,8 +87,8 @@ mod tests {
                 let (src, tgt, result) = $value;
                 assert_eq!(
                     SitePolicy::Same.matches_policy(
-                        Url::parse(src).ok().unwrap(),
-                        Url::parse(tgt).ok().unwrap()
+                        &Url::parse(src).ok().unwrap(),
+                        &Url::parse(tgt).ok().unwrap()
                     ),
                     result
                 );
@@ -124,8 +124,8 @@ mod tests {
                 let (src, tgt, result) = $value;
                 assert_eq!(
                     SitePolicy::Subdomain.matches_policy(
-                        Url::parse(src).ok().unwrap(),
-                        Url::parse(tgt).ok().unwrap()
+                        &Url::parse(src).ok().unwrap(),
+                        &Url::parse(tgt).ok().unwrap()
                     ),
                     result
                 );
@@ -161,8 +161,8 @@ mod tests {
                 let (src, tgt, result) = $value;
                 assert_eq!(
                     SitePolicy::Sibling.matches_policy(
-                        Url::parse(src).ok().unwrap(),
-                        Url::parse(tgt).ok().unwrap()
+                        &Url::parse(src).ok().unwrap(),
+                        &Url::parse(tgt).ok().unwrap()
                     ),
                     result
                 );
@@ -198,8 +198,8 @@ mod tests {
                 let (src, tgt, result) = $value;
                 assert_eq!(
                     SitePolicy::All.matches_policy(
-                        Url::parse(src).ok().unwrap(),
-                        Url::parse(tgt).ok().unwrap()
+                        &Url::parse(src).ok().unwrap(),
+                        &Url::parse(tgt).ok().unwrap()
                     ),
                     result
                 );

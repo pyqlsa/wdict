@@ -1,40 +1,51 @@
+use crate::doc_queue::DocQueue;
 use crate::error::Error;
 use crate::filter::FilterMode;
+use crate::worddb::WordDb;
 
 use scraper::{node::Node, Html};
-use std::collections::HashMap;
+use tokio::time::{sleep, Duration};
 
 /// Extracts words from html documents.
 pub struct Extractor {
     opts: ExtractOptions,
-    words: HashMap<String, bool>,
+    docs: DocQueue,
+    words: WordDb,
 }
 
 impl Extractor {
-    /// Returns a new Crawler instance with the default `reqwest::Client`.
-    pub fn new(
-        min_word_length: usize,
-        filters: Vec<FilterMode>,
-        include_js: bool,
-        include_css: bool,
-    ) -> Result<Self, Error> {
+    /// Returns a new Extractor instance.
+    pub fn new(opts: ExtractOptions, docs: DocQueue, worddb: WordDb) -> Result<Self, Error> {
         let extractor = Self {
-            opts: ExtractOptions::new(min_word_length, filters, include_js, include_css),
-            words: HashMap::new(),
+            opts,
+            docs,
+            words: worddb,
         };
         Ok(extractor)
     }
 
-    /// Returns the gathered words.
-    pub fn words(&self) -> HashMap<String, bool> {
-        self.words.clone()
+    /// Parse documents from the provided queue and extract words.
+    pub async fn parse_from_queue(&mut self) -> Result<(), Error> {
+        loop {
+            sleep(Duration::from_millis(100)).await;
+            if self.docs.is_empty() {
+                continue;
+            }
+            if let Some(doc) = self.docs.pop() {
+                self.words_from_doc(&doc);
+            } else {
+                break;
+            }
+        }
+        Ok(())
     }
 
-    /// Extract words from an html document.
-    pub fn words_from_doc(&mut self, document: &Html) -> () {
+    /// Extract words from the provided document.
+    pub fn words_from_doc(&mut self, document: &String) -> () {
+        let doc = Html::parse_document(&document);
         // note: alternatives to getting all text nodes (regardless if script/styel/etc. or not)
         //for text in document.clone().root_element().text() { ...do something... }
-        for d in document.clone().root_element().descendants() {
+        for d in doc.root_element().descendants() {
             if let Node::Text(text) = d.value() {
                 let parent_tag = d
                     .parent()
@@ -64,6 +75,7 @@ impl Extractor {
         }
     }
 
+    /// Filter text based on configured filters and capture resulting words.
     fn filter_text(&mut self, text: &str) -> () {
         let mut tmp = text.to_string();
         tmp = tmp.to_lowercase();
@@ -76,7 +88,7 @@ impl Extractor {
                     fintext = filter.filter_str(&fintext);
                 }
                 if fintext.len() >= self.opts.min_word_length() {
-                    self.words.entry(String::from(fintext)).or_insert(true);
+                    self.words.insert(fintext);
                 }
             }
         }
@@ -85,7 +97,7 @@ impl Extractor {
 
 /// Options used when building wordlists.
 #[derive(Debug, Clone)]
-struct ExtractOptions {
+pub struct ExtractOptions {
     /// Only save words greater than or equal to this value.
     min_word_length: usize,
     /// Filter strategy for words; multiple can be specified.
@@ -97,8 +109,8 @@ struct ExtractOptions {
 }
 
 impl ExtractOptions {
-    /// Returns a new CrawlOptions instance.
-    fn new(
+    /// Returns a new ExtractOptions instance.
+    pub fn new(
         min_word_length: usize,
         filters: Vec<FilterMode>,
         include_js: bool,
@@ -113,22 +125,22 @@ impl ExtractOptions {
     }
 
     /// Returns the minimum word length for saving words to the wordslist.
-    fn min_word_length(&self) -> usize {
+    pub fn min_word_length(&self) -> usize {
         self.min_word_length
     }
 
     /// Returns the configured filter mode for discovered words.
-    fn filters(&self) -> Vec<FilterMode> {
-        self.filters.clone()
+    pub fn filters(&self) -> impl Iterator<Item = &FilterMode> {
+        self.filters.iter()
     }
 
     /// Returns whether or not configuration dictates  to include js.
-    fn include_js(&self) -> bool {
+    pub fn include_js(&self) -> bool {
         self.include_js
     }
 
     /// Returns whether or not configuration dictates  to include css.
-    fn include_css(&self) -> bool {
+    pub fn include_css(&self) -> bool {
         self.include_css
     }
 }

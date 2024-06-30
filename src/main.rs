@@ -8,8 +8,12 @@ use std::fs::File;
 use std::io::Write;
 use tokio::signal;
 use tokio::sync::broadcast;
+use tokio::task::JoinHandle;
 
-use wdict::{CrawlOptions, Crawler, Error, Extractor, FilterMode, Shutdown, SitePolicy};
+use wdict::{
+    CrawlOptions, Crawler, DocQueue, Error, ExtractOptions, Extractor, FilterMode, Shutdown,
+    SitePolicy, UrlDb, WordDb,
+};
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -235,7 +239,38 @@ impl SitePolicyArg {
 #[derive(Serialize, Deserialize, Debug)]
 struct OutputUrls {
     visited: Vec<String>,
-    not_visited: Vec<String>,
+    unvisited: Vec<String>,
+    skipped: Vec<String>,
+    errored: Vec<String>,
+}
+
+/// Wait for thread handles to complete and process outputs.
+async fn wait_for_it(
+    h1: JoinHandle<Result<(), Error>>,
+    h2: JoinHandle<Result<(), Error>>,
+) -> Result<(), Error> {
+    let (r1, r2) = tokio::join!(h1, h2);
+    match r1 {
+        Ok(res) => {
+            if let Err(err) = res {
+                eprintln!("unexpected error while crawling {}", err);
+            }
+        }
+        Err(err) => {
+            eprintln!("unexpected error while joining threads {}", err);
+        }
+    }
+    match r2 {
+        Ok(res) => {
+            if let Err(err) = res {
+                eprintln!("unexpected error while extracting {}", err);
+            }
+        }
+        Err(err) => {
+            eprintln!("unexpected error while joining threads {}", err);
+        }
+    }
+    Ok(())
 }
 
 /// Main function.
@@ -262,43 +297,56 @@ async fn main() -> Result<(), Error> {
         args.inclue_css,
         args.site_policy.to_mode(),
     );
-
-    let mut crawler = Crawler::new(copts, Shutdown::new(notify_shutdown.subscribe()))?;
-
-    tokio::select! {
-        res = crawler.crawl() => {
-            if let Err(err) = res {
-                eprintln!("unexpected error while crawling {}", err);
-            }
-        }
-        _ = signal::ctrl_c() => {
-            println!("shutting down...");
-        }
-    }
-    // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
-    // receive the shutdown signal and can exit
-    drop(notify_shutdown);
-
-    let mut extractor = Extractor::new(
+    let eopts = ExtractOptions::new(
         args.min_word_length,
         to_modes(args.filters),
         args.inclue_js,
         args.inclue_css,
-    )?;
-
-    crawler.docs().iter().for_each(|doc| {
-        extractor.words_from_doc(&doc);
-    });
-
-    let len_words = extractor.words().len();
-    println!("unique words: {}", len_words);
-    println!(
-        "visited pages: {}",
-        crawler.urls().values().filter(|v| **v).count()
     );
 
+    let queue: DocQueue = DocQueue::new();
+    let q1 = DocQueue::clone(&queue);
+    let q2 = DocQueue::clone(&queue);
+
+    let urldb: UrlDb = UrlDb::new();
+    let u = UrlDb::clone(&urldb);
+
+    let words = WordDb::new();
+    let w = WordDb::clone(&words);
+
+    let mut crawler = Crawler::new(copts, q1, u, Shutdown::new(notify_shutdown.subscribe()))?;
+    let mut extractor = Extractor::new(eopts, q2, w)?;
+
+    let h1 = tokio::spawn(async move { crawler.crawl().await });
+    let h2 = tokio::spawn(async move { extractor.parse_from_queue().await });
+    let sig_handle = tokio::spawn(async move {
+        tokio::select! {
+            _ = signal::ctrl_c() => {
+                println!("shutting down...");
+                // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
+                // receive the shutdown signal and can exit
+                drop(notify_shutdown);
+            }
+        }
+    });
+
+    if let Err(err) = wait_for_it(h1, h2).await {
+        eprintln!("{}", err);
+    }
+
+    // cleanup if we weren't interrupted
+    if !sig_handle.is_finished() {
+        sig_handle.abort();
+    }
+
+    let len_urls = urldb.num_visited_urls();
+    let len_words = words.len();
+    println!();
+    println!("unique words: {}", len_words);
+    println!("visited pages: {}", len_urls);
+
     let mut file = File::create(args.output.clone()).expect("Error creating dictionary file");
-    extractor.words().iter().for_each(|(word, _v)| {
+    words.iter().for_each(|word| {
         let line = format!("{}\n", word);
         file.write_all(line.as_bytes())
             .expect("Error writing to dictionary");
@@ -307,8 +355,10 @@ async fn main() -> Result<(), Error> {
 
     if args.output_urls {
         let out_urls = OutputUrls {
-            visited: crawler.visited_urls(),
-            not_visited: crawler.not_visited_urls(),
+            visited: urldb.visited_urls(),
+            unvisited: urldb.unvisited_urls(),
+            skipped: urldb.skipped_urls(),
+            errored: urldb.errored_urls(),
         };
         let url_file = args.output_urls_file;
         if let Ok(j) = serde_json::to_string_pretty(&out_urls) {

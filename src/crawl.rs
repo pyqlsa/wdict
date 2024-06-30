@@ -1,21 +1,21 @@
+use crate::doc_queue::DocQueue;
 use crate::error::Error;
 use crate::shutdown::Shutdown;
 use crate::site::SitePolicy;
+use crate::urldb::UrlDb;
 
-use async_recursion::async_recursion;
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
-use std::collections::HashMap;
 use std::time::Duration;
 
 /// Crawls websites, gathering urls from pages.
 pub struct Crawler {
-    opts: CrawlOptions,
-    urls: HashMap<String, bool>,
-    docs: Vec<Html>,
-    cur_depth: usize,
     client: Client,
+    opts: CrawlOptions,
+    docs: DocQueue,
+    urldb: UrlDb,
+    cur_depth: usize,
     limiter: Ratelimiter,
     /// Listen for shutdown notifications.
     ///
@@ -25,18 +25,25 @@ pub struct Crawler {
 
 impl Crawler {
     /// Returns a new Crawler instance with the default `reqwest::Client`.
-    pub fn new(opts: CrawlOptions, shutdown: Shutdown) -> Result<Self, Error> {
+    pub fn new(
+        opts: CrawlOptions,
+        docs: DocQueue,
+        urldb: UrlDb,
+        shutdown: Shutdown,
+    ) -> Result<Self, Error> {
         let client = Client::builder()
             .connect_timeout(std::time::Duration::from_secs(5))
             .timeout(std::time::Duration::from_secs(10))
             .build()?;
-        Self::new_with_client(opts, client, shutdown)
+        Self::new_with_client(client, opts, docs, urldb, shutdown)
     }
 
     /// Returns a new Crawler instance with the provided `reqwest::Client`.
     pub fn new_with_client(
-        opts: CrawlOptions,
         client: Client,
+        opts: CrawlOptions,
+        docs: DocQueue,
+        urldb: UrlDb,
         shutdown: Shutdown,
     ) -> Result<Self, Error> {
         let tokens = if opts.requests_per_second() < 1 {
@@ -51,106 +58,78 @@ impl Crawler {
         let start_url = opts.url.clone();
         let mut crawler = Self {
             opts,
-            urls: HashMap::new(),
-            docs: Vec::new(),
+            docs,
+            urldb,
             cur_depth: 0,
             client,
             limiter,
             shutdown,
         };
-        crawler.mark_to_be_visited(String::from(start_url));
+        crawler.urldb.mark_unvisited(String::from(start_url));
         Ok(crawler)
     }
 
-    /// Returns the crawled urls.
-    pub fn urls(&self) -> HashMap<String, bool> {
-        self.urls.clone()
-    }
-
-    /// Returns the urls that were visited.
-    pub fn visited_urls(&self) -> Vec<String> {
-        self.urls()
-            .into_iter()
-            .filter(|(_k, v)| *v)
-            .map(|(k, _v)| k)
-            .collect()
-    }
-
-    /// Returns the urls that were discovered, but not visited.
-    pub fn not_visited_urls(&self) -> Vec<String> {
-        self.urls()
-            .into_iter()
-            .filter(|(_k, v)| !*v)
-            .map(|(k, _v)| k)
-            .collect()
-    }
-
-    /// Returns the gathered documents.
-    pub fn docs(&self) -> Vec<Html> {
-        self.docs.clone()
-    }
-
-    /// Inserts and marks a url as visited.
-    pub fn mark_visited(&mut self, url: String) -> () {
-        self.urls.insert(url.to_owned(), true);
-    }
-
-    /// Inserts and marks a url as not yet visited.
-    pub fn mark_to_be_visited(&mut self, url: String) -> () {
-        self.urls.insert(url.to_owned(), false);
-    }
-
     /// Crawl urls up to a given limit, scraping urls and words from pages.
-    #[async_recursion(?Send)]
     pub async fn crawl(&mut self) -> Result<(), Error> {
-        self.cur_depth += 1;
-        for (url, visited) in self.urls.clone().iter() {
+        while self.cur_depth < self.opts.depth() {
+            self.cur_depth += 1;
+            println!("crawling at depth {}", self.cur_depth);
+            for url in self.urldb.unvisited_urls() {
+                // give us a chance to receive graceful shutdown signal
+                tokio::select! {
+                  _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+                  _ = self.shutdown.recv() => {}
+                }
+                if self.shutdown.is_shutdown() {
+                    break;
+                }
+
+                let result = Url::parse(url.as_str());
+                if let Err(e) = result {
+                    eprintln!("not a url: {}", e);
+                    self.urldb.mark_errored(url.to_owned());
+                    continue;
+                }
+                if !self.matches_site_policy(&result.clone().unwrap()) {
+                    println!(
+                        "site policy '{}' violated for url: '{}', skipping...",
+                        self.opts.site(),
+                        url
+                    );
+                    self.urldb.mark_skipped(url.to_owned());
+                    continue;
+                }
+
+                println!("visiting {}", url);
+                let document = self.doc_from_url(String::from(url.to_owned())).await;
+                match document {
+                    Ok(doc) => {
+                        self.urldb.mark_visited(url.to_owned());
+                        self.urls_from_doc(&result.unwrap(), &doc);
+                        self.docs.push(Some(doc));
+                    }
+                    Err(e) => {
+                        self.urldb.mark_errored(url.to_owned());
+                        eprintln!("error fetching page: {}", e);
+                    }
+                }
+            }
             if self.shutdown.is_shutdown() {
                 break;
             }
-            let result = Url::parse(url.as_str());
-            if let Err(e) = result {
-                eprintln!("not a url: {}", e);
-                continue;
-            }
-            if !self
-                .opts
-                .site()
-                .matches_policy(self.opts.url(), result.clone().unwrap())
-            {
-                println!(
-                    "site policy '{}' violated for url: '{}', skipping...",
-                    self.opts.site(),
-                    url
-                );
-                continue;
-            }
-
-            if *visited {
-                println!("already visited '{}', skipping", url);
-                continue;
-            }
-
-            println!("visiting {}", url);
-            self.mark_visited(url.to_owned());
-            let document = self.doc_from_url(String::from(url)).await;
-            match document {
-                Ok(doc) => {
-                    self.urls_from_doc(&result.unwrap(), &doc);
-                    self.docs.push(doc);
-                }
-                Err(e) => eprintln!("{}", e),
-            }
         }
-        if self.cur_depth < self.opts.depth() {
-            println!("going deeper... current depth {}", self.cur_depth);
-            let _ = self.crawl().await; // safe to ignore result/error
-        }
+
+        self.docs.push(None);
         Ok(())
     }
 
+    /// Return whether or not the provided url matches the configured site policy.
+    fn matches_site_policy(&self, url: &Url) -> bool {
+        return self.opts.site().matches_policy(&self.opts.url(), &url);
+    }
+
     /// Get an html document from the provided url.
-    async fn doc_from_url(&self, url: String) -> Result<Html, Error> {
+    async fn doc_from_url(&self, url: String) -> Result<String, Error> {
         // TODO: do this smarter?
         for _ in 0..10 {
             if self.shutdown.is_shutdown() {
@@ -187,15 +166,15 @@ impl Crawler {
                 Err(Error::Request { why: e })
             }
             Ok(res) => {
-                let doc_text = res.text().await.unwrap();
-
-                Ok(Html::parse_document(&doc_text))
+                //Ok(Html::parse_document(&doc_text))
+                Ok(res.text().await.unwrap())
             }
         }
     }
 
     /// Extract urls from an html document.
-    fn urls_from_doc(&mut self, url: &Url, document: &Html) -> () {
+    fn urls_from_doc(&mut self, url: &Url, document: &String) -> () {
+        let doc = Html::parse_document(&document);
         // breadcrumbs for using selector to extract urls from elements...
         //let link_selector = Selector::parse(r#"a[href^="http"]"#).unwrap();
         //
@@ -204,7 +183,7 @@ impl Crawler {
         //        .entry(String::from(elem.value().attr("href").unwrap()))
         //        .or_insert(false);
         //}
-        for d in document.clone().root_element().descendants() {
+        for d in doc.root_element().descendants() {
             if let Node::Element(elem) = d.value() {
                 if let Some(href) = elem.attr("href") {
                     let final_url = Self::url_from_href(url, href);
@@ -252,14 +231,14 @@ impl Crawler {
             match elem.name() {
                 "link" => {
                     if self.opts.include_css() && elem.attr("rel").unwrap() == "stylesheet" {
-                        self.urls.entry(url.clone()).or_insert(false);
+                        self.urldb.cond_mark_unvisited(url.clone());
                     }
                     if self.opts.include_js() && elem.attr("as").unwrap() == "script" {
-                        self.urls.entry(url.clone()).or_insert(false);
+                        self.urldb.cond_mark_unvisited(url.clone());
                     }
                 }
                 "a" => {
-                    self.urls.entry(url.clone()).or_insert(false);
+                    self.urldb.cond_mark_unvisited(url.clone());
                 }
                 _ => {}
             }

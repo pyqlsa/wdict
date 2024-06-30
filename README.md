@@ -134,7 +134,6 @@ A list of ideas for future work:
  - archive mode to crawl and save pages locally
  - build dictionaries from local (archived) pages
  - support different mime types
- - better async?
 
 ## License
 
