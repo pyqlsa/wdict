@@ -1,5 +1,6 @@
 use crate::doc_queue::DocQueue;
 use crate::error::Error;
+use crate::helpers;
 use crate::shutdown::Shutdown;
 use crate::site::SitePolicy;
 use crate::urldb::UrlDb;
@@ -7,7 +8,11 @@ use crate::urldb::UrlDb;
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
-use std::time::Duration;
+use std::collections::VecDeque;
+use std::sync::Arc;
+use std::{fs, io::Read};
+use tokio::sync::Semaphore;
+use tokio::time::{sleep, Duration};
 
 /// Crawls websites, gathering urls from pages.
 pub struct Crawler {
@@ -71,47 +76,50 @@ impl Crawler {
 
     /// Crawl urls up to a given limit, scraping urls and words from pages.
     pub async fn crawl(&mut self) -> Result<(), Error> {
+        let semaphore = Arc::new(Semaphore::new(self.opts.max_concurrent()));
         while self.cur_depth < self.opts.depth() {
             self.cur_depth += 1;
+            if self.urldb.num_unvisited_urls() < 1 {
+                println!("candidate urls exhausted...");
+                break;
+            }
             println!("crawling at depth {}", self.cur_depth);
-            for url in self.urldb.unvisited_urls() {
-                // give us a chance to receive graceful shutdown signal
+            let mut jhs = VecDeque::new();
+            for url_str in self.urldb.unvisited_urls() {
                 tokio::select! {
-                  _ = tokio::time::sleep(std::time::Duration::from_millis(50)) => {}
+                  _ = async {
+                    if let Err(dur) = self.limiter.try_wait() {
+                        sleep(dur).await;
+                    }
+                    // soften how we hit the limiter
+                    let millis = 1000 / self.opts.req_per_sec;
+                    sleep(Duration::from_millis(millis)).await;
+                  } => {}
                   _ = self.shutdown.recv() => {}
                 }
                 if self.shutdown.is_shutdown() {
                     break;
                 }
 
-                let result = Url::parse(url.as_str());
-                if let Err(e) = result {
-                    eprintln!("not a url: {}", e);
-                    self.urldb.mark_errored(url.to_owned());
-                    continue;
-                }
-                if !self.matches_site_policy(&result.clone().unwrap()) {
-                    println!(
-                        "site policy '{}' violated for url: '{}', skipping...",
-                        self.opts.site(),
-                        url
-                    );
-                    self.urldb.mark_skipped(url.to_owned());
-                    continue;
-                }
-
-                println!("visiting {}", url);
-                let document = self.doc_from_url(String::from(url.to_owned())).await;
-                match document {
-                    Ok(doc) => {
-                        self.urldb.mark_visited(url.to_owned());
-                        self.urls_from_doc(&result.unwrap(), &doc);
-                        self.docs.push(Some(doc));
-                    }
-                    Err(e) => {
-                        self.urldb.mark_errored(url.to_owned());
-                        eprintln!("error fetching page: {}", e);
-                    }
+                let mut spider = Spider::new(
+                    self.client.clone(),
+                    self.opts.clone(),
+                    self.docs.clone(),
+                    self.urldb.clone(),
+                    self.shutdown.clone(),
+                );
+                let sem = semaphore.clone();
+                let jh = tokio::spawn(async move {
+                    let permit = sem.acquire().await.unwrap();
+                    let res = spider.crawl_url(&url_str).await;
+                    drop(permit);
+                    res
+                });
+                jhs.push_back(jh);
+            }
+            while !jhs.is_empty() {
+                if let Some(jh) = jhs.pop_front() {
+                    let _ = tokio::join!(jh);
                 }
             }
             if self.shutdown.is_shutdown() {
@@ -122,6 +130,177 @@ impl Crawler {
         self.docs.push(None);
         Ok(())
     }
+}
+
+/// Crawls websites, gathering urls from pages.
+struct Spider {
+    client: Client,
+    opts: CrawlOptions,
+    docs: DocQueue,
+    urldb: UrlDb,
+    /// Listen for shutdown notifications.
+    ///
+    /// A wrapper around the `broadcast::Receiver` to be paired with a sender.
+    shutdown: Shutdown,
+}
+
+impl Spider {
+    /// Returns a new Spider instance with the provided `reqwest::Client`.
+    pub fn new(
+        client: Client,
+        opts: CrawlOptions,
+        docs: DocQueue,
+        urldb: UrlDb,
+        shutdown: Shutdown,
+    ) -> Self {
+        Self {
+            opts,
+            docs,
+            urldb,
+            client,
+            shutdown,
+        }
+    }
+    async fn crawl_url(&mut self, url_str: &String) -> Result<(), ()> {
+        // give us a chance to receive graceful shutdown signal
+        tokio::select! {
+          _ = sleep(Duration::from_millis(u64::from(helpers::num_between(20, 120)))) => {}
+          _ = self.shutdown.recv() => {}
+        }
+        if self.shutdown.is_shutdown() {
+            //return Err(Error::EarlyTerminationError);
+            return Err(());
+        }
+
+        let result = Url::parse(url_str.as_str());
+        if let Err(e) = result {
+            eprintln!("not a url: {}", e);
+            self.urldb.mark_errored(url_str.clone());
+            return Ok(());
+        }
+        let url = result.unwrap();
+
+        match self.opts.mode {
+            CrawlMode::Web => self.crawl_web(&url).await,
+            CrawlMode::Local => self.crawl_local(&url).await,
+        }
+        Ok(())
+    }
+
+    async fn crawl_local(&mut self, url: &Url) {
+        let path = url.to_file_path().unwrap();
+        let display = path.display();
+
+        println!("visiting {}", display);
+        let meta_res = fs::metadata(&path);
+        if let Err(e) = meta_res {
+            self.urldb.mark_errored(url.to_string());
+            eprintln!("error getting path metadata {}: {}", display, e);
+            return;
+        }
+
+        let meta = meta_res.unwrap();
+        if meta.is_file() {
+            self.handle_local_file(&url);
+        } else if meta.is_dir() {
+            self.handle_local_dir(&url);
+        } else {
+            return;
+        }
+    }
+
+    fn handle_local_file(&mut self, url: &Url) {
+        let path = url.to_file_path().unwrap();
+        let display = path.display();
+
+        let file_res = fs::File::open(&path);
+        if let Err(e) = file_res {
+            self.urldb.mark_errored(url.to_string());
+            eprintln!("error opening file {}: {}", display, e);
+            return;
+        }
+
+        let mut file = file_res.unwrap();
+        let mut s = String::new();
+        match file.read_to_string(&mut s) {
+            Err(e) => {
+                self.urldb.mark_errored(url.to_string());
+                eprintln!("error reading file {}: {}", display, e);
+            }
+            Ok(_) => {
+                self.urldb.mark_visited(url.to_string());
+                self.docs.push(Some(s));
+            }
+        }
+    }
+
+    fn handle_local_dir(&mut self, url: &Url) {
+        let path = url.to_file_path().unwrap();
+        let display = path.display();
+
+        let paths_res = fs::read_dir(&path);
+        if let Err(e) = paths_res {
+            self.urldb.mark_errored(url.to_string());
+            eprintln!("error reading directory {}: {}", display, e);
+            return;
+        }
+        let paths = paths_res.unwrap();
+        for pr in paths {
+            match pr {
+                Err(e) => {
+                    //self.urldb.mark_errored(url.to_string());
+                    eprintln!("error reading directory contents {}: {}", display, e);
+                    continue;
+                }
+                Ok(p) => {
+                    let child = p.path().display().to_string();
+                    let res = helpers::url_from_path_str(child.as_str());
+                    match res {
+                        Err(_) => {
+                            eprintln!("error parsing path as url: {}", child);
+                            continue;
+                        }
+                        Ok(u) => {
+                            self.urldb.mark_unvisited(u.to_string());
+                        }
+                    }
+                }
+            }
+            self.urldb.mark_visited(url.to_string());
+        }
+    }
+
+    async fn crawl_web(&mut self, url: &Url) {
+        if !self.matches_site_policy(&url) {
+            println!(
+                "site policy '{}' violated for url: '{}', skipping...",
+                self.opts.site(),
+                url.as_str()
+            );
+            self.urldb.mark_skipped(url.as_str().to_string());
+            return;
+        }
+
+        println!("visiting {}", url.as_str());
+        let document = self.doc_from_url(&url.as_str().to_string()).await;
+        match document {
+            Ok(doc) => {
+                self.urldb.mark_visited(url.to_string());
+                self.urls_from_doc(&url, &doc);
+                self.docs.push(Some(doc));
+            }
+            Err(e) => match e {
+                Error::EarlyTerminationError => {
+                    //self.urldb.mark_unvisited(url.to_string());
+                    //eprintln!("terminated while fetching: {}", url.as_str());
+                }
+                _ => {
+                    self.urldb.mark_errored(url.to_string());
+                    eprintln!("error fetching page {}: {}", url.as_str(), e);
+                }
+            },
+        }
+    }
 
     /// Return whether or not the provided url matches the configured site policy.
     fn matches_site_policy(&self, url: &Url) -> bool {
@@ -129,21 +308,16 @@ impl Crawler {
     }
 
     /// Get an html document from the provided url.
-    async fn doc_from_url(&self, url: String) -> Result<String, Error> {
-        // TODO: do this smarter?
-        for _ in 0..10 {
-            if self.shutdown.is_shutdown() {
-                return Err(Error::EarlyTerminationError);
-            }
-            if let Err(sleep) = self.limiter.try_wait() {
-                std::thread::sleep(sleep);
-                continue;
-            } else {
-                break;
-            }
+    async fn doc_from_url(&mut self, url: &String) -> Result<String, Error> {
+        tokio::select! {
+            response = self.client.get(url).send() => { Self::handle_response(response).await }
+            _ = self.shutdown.recv() => { Err(Error::EarlyTerminationError) }
         }
+    }
 
-        let response = self.client.get(url).send().await;
+    async fn handle_response(
+        response: Result<reqwest::Response, reqwest::Error>,
+    ) -> Result<String, Error> {
         match response {
             Err(e) => {
                 if e.is_status() {
@@ -163,12 +337,9 @@ impl Crawler {
                 } else {
                     eprintln!("unexpected error: {}", e);
                 }
-                Err(Error::Request { why: e })
+                Err(Error::RequestError { why: e })
             }
-            Ok(res) => {
-                //Ok(Html::parse_document(&doc_text))
-                Ok(res.text().await.unwrap())
-            }
+            Ok(res) => Ok(res.text().await.unwrap()),
         }
     }
 
@@ -217,7 +388,7 @@ impl Crawler {
                 if let Ok(joined_url) = url.join(href) {
                     return Ok(String::from(joined_url.as_str()));
                 } else {
-                    return Err(Error::UrlParsing { why: e });
+                    return Err(Error::UrlParseError { why: e });
                 }
             }
         }
@@ -261,6 +432,10 @@ pub struct CrawlOptions {
     site: SitePolicy,
     /// Upper limit of requests per second while crawling.
     req_per_sec: u64,
+    /// Maximum number of concurrent requests.
+    max_concurrent: usize,
+    /// Crawl mode.
+    mode: CrawlMode,
 }
 
 impl CrawlOptions {
@@ -268,18 +443,22 @@ impl CrawlOptions {
     pub fn new(
         url: Url,
         depth: usize,
-        req_per_sec: u64,
         include_js: bool,
         include_css: bool,
         site: SitePolicy,
+        req_per_sec: u64,
+        max_concurrent: usize,
+        mode: CrawlMode,
     ) -> Self {
         Self {
             url,
             depth,
-            req_per_sec,
             include_js,
             include_css,
             site,
+            req_per_sec,
+            max_concurrent,
+            mode,
         }
     }
 
@@ -293,10 +472,6 @@ impl CrawlOptions {
         self.depth
     }
 
-    pub fn requests_per_second(&self) -> u64 {
-        self.req_per_sec
-    }
-
     /// Returns whether or not configuration dictates  to include js.
     pub fn include_js(&self) -> bool {
         self.include_js
@@ -307,8 +482,43 @@ impl CrawlOptions {
         self.include_css
     }
 
+    /// Returns number of configured requests per second.
+    pub fn requests_per_second(&self) -> u64 {
+        self.req_per_sec
+    }
+
+    /// Returns maximum number of concurrent requests allowed.
+    pub fn max_concurrent(&self) -> usize {
+        self.max_concurrent
+    }
+
     /// Returns the configured site policy for visiting discovered URLs.
     pub fn site(&self) -> SitePolicy {
         self.site
+    }
+}
+
+#[derive(Copy, Debug, Clone)]
+pub enum CrawlMode {
+    Web,
+    Local,
+}
+
+/// Display implementation.
+impl std::fmt::Display for CrawlMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Web => write!(f, "Web"),
+            Self::Local => write!(f, "Local"),
+        }
+    }
+}
+
+impl PartialEq for CrawlMode {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::Web, Self::Web) | (Self::Local, Self::Local) => true,
+            _ => false,
+        }
     }
 }

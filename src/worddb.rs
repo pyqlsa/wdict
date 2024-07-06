@@ -4,15 +4,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 /// Stores unique words.
 pub struct WordDb(Arc<Mutex<HashMap<String, bool>>>);
 
+impl Clone for WordDb {
+    /// Returns a clone/handle of the given WordDb.
+    fn clone(&self) -> Self {
+        WordDb(Arc::clone(&self.0))
+    }
+}
+
 impl WordDb {
     /// Returns a new WordDb instance.
     pub fn new() -> Self {
         WordDb(Arc::new(Mutex::new(HashMap::new())))
-    }
-
-    /// Returns a clone/handle of the given WordDb.
-    pub fn clone(db: &Self) -> Self {
-        WordDb(Arc::clone(&db.0))
     }
 
     /// Returns the length of the word database.

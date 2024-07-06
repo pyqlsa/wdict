@@ -4,15 +4,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 /// Stores urls, tracking whether or not they have been visited.
 pub struct UrlDb(Arc<Mutex<HashMap<String, Status>>>);
 
+impl Clone for UrlDb {
+    /// Returns a clone/handle of the given UrlDb.
+    fn clone(&self) -> Self {
+        UrlDb(Arc::clone(&self.0))
+    }
+}
+
 impl UrlDb {
     /// Returns a new UrlDb instance.
     pub fn new() -> Self {
         UrlDb(Arc::new(Mutex::new(HashMap::new())))
-    }
-
-    /// Returns a clone/handle of the given UrlDb.
-    pub fn clone(db: &Self) -> Self {
-        UrlDb(Arc::clone(&db.0))
     }
 
     /// Returns an iterator over the urls that were discovered and visited.

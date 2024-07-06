@@ -5,15 +5,17 @@ use std::sync::{Arc, Mutex, MutexGuard};
 /// Provides a FIFO queue for documents.
 pub struct DocQueue(Arc<Mutex<VecDeque<Option<String>>>>);
 
+impl Clone for DocQueue {
+    /// Returns a clone/handle of the given DocQueue.
+    fn clone(&self) -> Self {
+        DocQueue(Arc::clone(&self.0))
+    }
+}
+
 impl DocQueue {
     /// Returns a new DocQueue instance.
     pub fn new() -> Self {
         DocQueue(Arc::new(Mutex::new(VecDeque::new())))
-    }
-
-    /// Returns a clone/handle of the given DocQueue.
-    pub fn clone(q: &Self) -> Self {
-        DocQueue(Arc::clone(&q.0))
     }
 
     /// Push a document into the queue.

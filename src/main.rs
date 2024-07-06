@@ -4,41 +4,35 @@ use clap::{Args, Parser, ValueEnum};
 use reqwest::Url;
 use serde::{Deserialize, Serialize};
 use serde_json;
-use std::fs::File;
 use std::io::Write;
+use std::{fs::File, process::exit};
 use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use wdict::{
-    CrawlOptions, Crawler, DocQueue, Error, ExtractOptions, Extractor, FilterMode, Shutdown,
-    SitePolicy, UrlDb, WordDb,
+    url_from_path_str, CrawlMode, CrawlOptions, Crawler, DocQueue, Error, ExtractOptions,
+    Extractor, FilterMode, Shutdown, SitePolicy, UrlDb, WordDb,
 };
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 struct Cli {
-    /// URL to start crawling from.
+    /// Target to initiate crawling.
     #[command(flatten)]
-    site: Site,
+    target: Target,
     /// Limit the depth of crawling urls.
     #[arg(short, long, default_value_t = 1)]
     depth: usize,
     /// Only save words greater than or equal to this value.
     #[arg(short, long, default_value_t = 3)]
     min_word_length: usize,
-    /// Number of requests to make per second.
-    #[arg(short, long, default_value_t = 20)]
-    req_per_sec: u64,
-    /// File to write dictionary to (will be overwritten if it already exists).
-    #[arg(short, long, default_value = "wdict.txt", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    output: String,
-    /// Write discovered urls to a file.
-    #[arg(long, default_value_t = false)]
-    output_urls: bool,
-    /// File to write urls to, json formatted (will be overwritten if it already exists).
-    #[arg(long, default_value = "urls.json", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    output_urls_file: String,
+    /// Include javascript from <script> tags and urls.
+    #[arg(short = 'j', long, default_value_t = false)]
+    inclue_js: bool,
+    /// Include CSS from <style> tags and urls.
+    #[arg(short = 'c', long, default_value_t = false)]
+    inclue_css: bool,
     /// Filter strategy for words; multiple can be specified (comma separated).
     #[arg(
         long,
@@ -48,26 +42,40 @@ struct Cli {
         value_delimiter = ',',
     )]
     filters: Vec<FilterArg>,
-    /// Include javascript from <script> tags and urls.
-    #[arg(short = 'j', long, default_value_t = false)]
-    inclue_js: bool,
-    /// Include CSS from <style> tags and urls.
-    #[arg(short = 'c', long, default_value_t = false)]
-    inclue_css: bool,
     /// Site policy for discovered urls.
     #[arg(long, default_value = "same", value_enum)]
     site_policy: SitePolicyArg,
+    /// Number of requests to make per second.
+    #[arg(short, long, default_value_t = 5)]
+    req_per_sec: u64,
+    /// Maximum number of concurrent requests.
+    #[arg(short = 'x', long, default_value_t = 5)]
+    max_concurrent: usize,
+    /// File to write dictionary to (will be overwritten if it already exists).
+    #[arg(short, long, default_value = "wdict.txt", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    output: String,
+    /// Write discovered urls to a file.
+    #[arg(long, default_value_t = false)]
+    output_urls: bool,
+    /// File to write urls to, json formatted (will be overwritten if it already exists).
+    #[arg(long, default_value = "urls.json", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    output_urls_file: String,
 }
 
 #[derive(Args, Debug, Clone)]
 #[group(required = true, multiple = false)]
-struct Site {
+struct Target {
     /// URL to start crawling from.
     #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
     url: Option<String>,
+
     /// Pre-canned theme URLs to start crawling from (for fun).
     #[arg(long, value_enum)]
     theme: Option<Theme>,
+
+    /// Local file path to start crawling from.
+    #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    path: Option<String>,
 }
 
 fn str_not_whitespace(value: &str) -> Result<String, Error> {
@@ -272,49 +280,95 @@ async fn wait_for_it(
     Ok(())
 }
 
+/// Helper for url parsing, predominantly to squash errors.
+fn parse_url(url_str: &str) -> Result<Url, ()> {
+    let res = Url::parse(url_str);
+    match res {
+        Err(e) => {
+            eprintln!("error parsing url {}: {}", url_str, e);
+            Err(())
+        }
+        Ok(u) => Ok(u),
+    }
+}
+
+/// Helper for parsing a Target into a Url.
+fn parse_target(t: &Target) -> Result<Url, ()> {
+    if let Some(url_str) = t.url.as_deref() {
+        return parse_url(url_str);
+    }
+
+    if let Some(t) = t.theme {
+        return parse_url(t.as_str());
+    }
+
+    if let Some(p) = t.path.as_deref() {
+        let res = url_from_path_str(&p);
+        match res {
+            Err(e) => {
+                eprintln!("error parsing path {} as url: {}", p, e);
+            }
+            Ok(u) => {
+                return parse_url(&u.as_str());
+            }
+        }
+    }
+
+    return Err(());
+}
+
 /// Main function.
 #[tokio::main]
 async fn main() -> Result<(), Error> {
     let args = Cli::parse();
-    let site = &args.site;
-    let url = if let Some(url_str) = site.url.as_deref() {
-        Url::parse(url_str)?
+    let target_arg = &args.target;
+
+    let url_res = parse_target(&target_arg);
+    if let Err(_) = url_res {
+        exit(1);
+    }
+    let url = url_res.unwrap();
+
+    let crawl_mode = if url.scheme() == "file" {
+        CrawlMode::Local
     } else {
-        if let Some(t) = site.theme {
-            Url::parse(t.as_str())?
-        } else {
-            Url::parse("")?
-        }
+        CrawlMode::Web
     };
+    println!(
+        "using '{}' as target with crawl mode: {}",
+        &url.as_str(),
+        crawl_mode
+    );
 
     let (notify_shutdown, _) = broadcast::channel(1);
     let copts = CrawlOptions::new(
         url,
         args.depth,
-        args.req_per_sec,
         args.inclue_js,
         args.inclue_css,
         args.site_policy.to_mode(),
+        args.req_per_sec,
+        args.max_concurrent,
+        crawl_mode,
     );
     let eopts = ExtractOptions::new(
         args.min_word_length,
-        to_modes(args.filters),
         args.inclue_js,
         args.inclue_css,
+        to_modes(args.filters),
     );
 
     let queue: DocQueue = DocQueue::new();
-    let q1 = DocQueue::clone(&queue);
-    let q2 = DocQueue::clone(&queue);
+    let (q1, q2) = (queue.clone(), queue.clone());
 
     let urldb: UrlDb = UrlDb::new();
-    let u = UrlDb::clone(&urldb);
+    let u = urldb.clone();
 
     let words = WordDb::new();
-    let w = WordDb::clone(&words);
+    let w = words.clone();
 
     let mut crawler = Crawler::new(copts, q1, u, Shutdown::new(notify_shutdown.subscribe()))?;
-    let mut extractor = Extractor::new(eopts, q2, w)?;
+    let mut extractor = Extractor::new(eopts, q2, w);
 
     let h1 = tokio::spawn(async move { crawler.crawl().await });
     let h2 = tokio::spawn(async move { extractor.parse_from_queue().await });
@@ -342,7 +396,7 @@ async fn main() -> Result<(), Error> {
     let len_words = words.len();
     println!();
     println!("unique words: {}", len_words);
-    println!("visited pages: {}", len_urls);
+    println!("visited urls: {}", len_urls);
 
     let mut file = File::create(args.output.clone()).expect("Error creating dictionary file");
     words.iter().for_each(|word| {

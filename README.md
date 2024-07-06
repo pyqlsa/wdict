@@ -35,7 +35,7 @@ cargo build --release
 ```bash
 Create dictionaries by scraping webpages.
 
-Usage: wdict [OPTIONS] <--url <URL>|--theme <THEME>>
+Usage: wdict [OPTIONS] <--url <URL>|--theme <THEME>|--path <PATH>>
 
 Options:
   -u, --url <URL>
@@ -54,6 +54,9 @@ Options:
           - greco-roman: Greek and Roman Mythology themed URL <https://www.gutenberg.org/files/22381/22381-h/22381-h.htm>
           - lovecraft:   H.P. Lovecraft themed URL <https://www.hplovecraft.com>
 
+  -p, --path <PATH>
+          Local file path to start crawling from
+
   -d, --depth <DEPTH>
           Limit the depth of crawling urls
 
@@ -64,23 +67,11 @@ Options:
 
           [default: 3]
 
-  -r, --req-per-sec <REQ_PER_SEC>
-          Number of requests to make per second
+  -j, --inclue-js
+          Include javascript from <script> tags and urls
 
-          [default: 20]
-
-  -o, --output <OUTPUT>
-          File to write dictionary to (will be overwritten if it already exists)
-
-          [default: wdict.txt]
-
-      --output-urls
-          Write discovered urls to a file
-
-      --output-urls-file <OUTPUT_URLS_FILE>
-          File to write urls to, json formatted (will be overwritten if it already exists)
-
-          [default: urls.json]
+  -c, --inclue-css
+          Include CSS from <style> tags and urls
 
       --filters <FILTERS>...
           Filter strategy for words; multiple can be specified (comma separated)
@@ -100,12 +91,6 @@ Options:
           - only-ascii:   Keep only words that exclusively contain ascii characters
           - none:         Leave the word as-is
 
-  -j, --inclue-js
-          Include javascript from <script> tags and urls
-
-  -c, --inclue-css
-          Include CSS from <style> tags and urls
-
       --site-policy <SITE_POLICY>
           Site policy for discovered urls
 
@@ -116,6 +101,29 @@ Options:
           - subdomain: Allow crawling urls if they are the same domain or subdomains
           - sibling:   Allow crawling urls if they are the same domain or a sibling
           - all:       Allow crawling all urls, regardless of domain
+
+  -r, --req-per-sec <REQ_PER_SEC>
+          Number of requests to make per second
+
+          [default: 5]
+
+  -x, --max-concurrent <MAX_CONCURRENT>
+          Maximum number of concurrent requests
+
+          [default: 5]
+
+  -o, --output <OUTPUT>
+          File to write dictionary to (will be overwritten if it already exists)
+
+          [default: wdict.txt]
+
+      --output-urls
+          Write discovered urls to a file
+
+      --output-urls-file <OUTPUT_URLS_FILE>
+          File to write urls to, json formatted (will be overwritten if it already exists)
+
+          [default: urls.json]
 
   -h, --help
           Print help (see a summary with '-h')

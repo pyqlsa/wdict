@@ -260,9 +260,9 @@ dependencies = [
 
 [[package]]
 name = "decancer"
-version = "3.2.2"
+version = "3.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "89dc48fa5c407ad29590bc5cc17a56684ed7b4f8215a9b65a31644ff051557f4"
+checksum = "0d14bdff2b0fd0e3eb4f1af30efc2cb6419c734b5cb93da37521a13313218e3f"
 dependencies = [
  "lazy_static",
  "paste",
@@ -1033,9 +1033,9 @@ dependencies = [
 
 [[package]]
 name = "psl"
-version = "2.1.49"
+version = "2.1.50"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c11928d9b009645f617a3ff75bd992ff150dd239b1ad8e2949d36c0dc998438a"
+checksum = "20f2890e9f6f068d927643e8d547931b537f21fd298e197c4837f1265b11e560"
 dependencies = [
  "psl-types",
 ]
@@ -1352,9 +1352,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.118"
+version = "1.0.120"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d947f6b3163d8857ea16c4fa0dd4840d52f3041039a85decd46867eb1abef2e4"
+checksum = "4e0d21c9a8cae1235ad58a00c11cb40d4b1e5c784f1ef2c537876ed6ffd8b7c5"
 dependencies = [
  "itoa",
  "ryu",
@@ -1878,7 +1878,7 @@ checksum = "4f186bd2dcf04330886ce82d6f33dd75a7bfcf69ecf5763b89fcde53b6ac9838"
 
 [[package]]
 name = "wdict"
-version = "0.1.13"
+version = "0.1.14"
 dependencies = [
  "clap",
  "decancer",

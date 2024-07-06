@@ -19,6 +19,16 @@ pub struct Shutdown {
     notify: broadcast::Receiver<()>,
 }
 
+impl Clone for Shutdown {
+    /// Returns a clone/handle of the given WordDb.
+    fn clone(&self) -> Self {
+        Shutdown {
+            is_shutdown: self.is_shutdown,
+            notify: self.notify.resubscribe(),
+        }
+    }
+}
+
 impl Shutdown {
     /// Create a new `Shutdown` backed by the given `broadcast::Receiver`.
     pub fn new(notify: broadcast::Receiver<()>) -> Shutdown {

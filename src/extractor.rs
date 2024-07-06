@@ -1,6 +1,7 @@
 use crate::doc_queue::DocQueue;
 use crate::error::Error;
 use crate::filter::FilterMode;
+use crate::helpers;
 use crate::worddb::WordDb;
 
 use scraper::{node::Node, Html};
@@ -15,19 +16,18 @@ pub struct Extractor {
 
 impl Extractor {
     /// Returns a new Extractor instance.
-    pub fn new(opts: ExtractOptions, docs: DocQueue, worddb: WordDb) -> Result<Self, Error> {
-        let extractor = Self {
-            opts,
-            docs,
-            words: worddb,
-        };
-        Ok(extractor)
+    pub fn new(opts: ExtractOptions, docs: DocQueue, words: WordDb) -> Self {
+        Self { opts, docs, words }
     }
 
     /// Parse documents from the provided queue and extract words.
     pub async fn parse_from_queue(&mut self) -> Result<(), Error> {
+        sleep(Duration::from_millis(500)).await;
         loop {
-            sleep(Duration::from_millis(100)).await;
+            sleep(Duration::from_millis(u64::from(helpers::num_between(
+                10, 30,
+            ))))
+            .await;
             if self.docs.is_empty() {
                 continue;
             }
@@ -100,38 +100,33 @@ impl Extractor {
 pub struct ExtractOptions {
     /// Only save words greater than or equal to this value.
     min_word_length: usize,
-    /// Filter strategy for words; multiple can be specified.
-    filters: Vec<FilterMode>,
     /// Include javascript from html pages.
     include_js: bool,
     /// Include css from html pages.
     include_css: bool,
+    /// Filter strategy for words; multiple can be specified.
+    filters: Vec<FilterMode>,
 }
 
 impl ExtractOptions {
     /// Returns a new ExtractOptions instance.
     pub fn new(
         min_word_length: usize,
-        filters: Vec<FilterMode>,
         include_js: bool,
         include_css: bool,
+        filters: Vec<FilterMode>,
     ) -> Self {
         Self {
             min_word_length,
-            filters,
             include_js,
             include_css,
+            filters,
         }
     }
 
     /// Returns the minimum word length for saving words to the wordslist.
     pub fn min_word_length(&self) -> usize {
         self.min_word_length
-    }
-
-    /// Returns the configured filter mode for discovered words.
-    pub fn filters(&self) -> impl Iterator<Item = &FilterMode> {
-        self.filters.iter()
     }
 
     /// Returns whether or not configuration dictates  to include js.
@@ -142,5 +137,10 @@ impl ExtractOptions {
     /// Returns whether or not configuration dictates  to include css.
     pub fn include_css(&self) -> bool {
         self.include_css
+    }
+
+    /// Returns the configured filter mode for discovered words.
+    pub fn filters(&self) -> impl Iterator<Item = &FilterMode> {
+        self.filters.iter()
     }
 }
