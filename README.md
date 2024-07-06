@@ -1,5 +1,5 @@
 # wdict
-Create dictionaries by scraping webpages.
+Create dictionaries by scraping webpages or crawling local files.
 
 Similar tools (some features inspired by them):
 - [CeWL](https://github.com/digininja/CeWL)
@@ -33,7 +33,7 @@ cargo build --release
 ## Usage
 <!-- readme-help -->
 ```bash
-Create dictionaries by scraping webpages.
+Create dictionaries by scraping webpages or crawling local files.
 
 Usage: wdict [OPTIONS] <--url <URL>|--theme <THEME>|--path <PATH>>
 

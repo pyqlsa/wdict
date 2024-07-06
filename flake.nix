@@ -1,6 +1,6 @@
 # with help from https://hoverbear.org/blog/a-flake-for-your-crate/
 {
-  description = "Create dictionaries by scraping webpages.";
+  description = "Create dictionaries by scraping webpages or crawling local files.";
 
   inputs = {
     nixpkgs = {
