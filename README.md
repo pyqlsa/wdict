@@ -35,7 +35,7 @@ cargo build --release
 ```bash
 Create dictionaries by scraping webpages or crawling local files.
 
-Usage: wdict [OPTIONS] <--url <URL>|--theme <THEME>|--path <PATH>>
+Usage: wdict [OPTIONS] <--url <URL>|--theme <THEME>|--path <PATH>|--resume|--resume-strict>
 
 Options:
   -u, --url <URL>
@@ -57,8 +57,14 @@ Options:
   -p, --path <PATH>
           Local file path to start crawling from
 
+      --resume
+          Resume crawling from a previous run; state file must exist; existence of dictionary is optional; parameters from state are ignored, instead favoring arguments provided on the command line
+
+      --resume-strict
+          Resume crawling from a previous run; state file must exist; existence of dictionary is optional; 'strict' enforces that all arguments from the state file are observed
+
   -d, --depth <DEPTH>
-          Limit the depth of crawling urls
+          Limit the depth of crawling URLs
 
           [default: 1]
 
@@ -67,11 +73,16 @@ Options:
 
           [default: 3]
 
-  -j, --inclue-js
-          Include javascript from <script> tags and urls
+  -x, --max-word-length <MAX_WORD_LENGTH>
+          Only save words less than or equal to this value
 
-  -c, --inclue-css
-          Include CSS from <style> tags and urls
+          [default: 18446744073709551615]
+
+  -j, --include-js
+          Include javascript from <script> tags and URLs
+
+  -c, --include-css
+          Include CSS from <style> tags and URLs
 
       --filters <FILTERS>...
           Filter strategy for words; multiple can be specified (comma separated)
@@ -92,23 +103,23 @@ Options:
           - none:         Leave the word as-is
 
       --site-policy <SITE_POLICY>
-          Site policy for discovered urls
+          Site policy for discovered URLs
 
           [default: same]
 
           Possible values:
-          - same:      Allow crawling urls, only if the domain exactly matches
-          - subdomain: Allow crawling urls if they are the same domain or subdomains
-          - sibling:   Allow crawling urls if they are the same domain or a sibling
-          - all:       Allow crawling all urls, regardless of domain
+          - same:      Allow crawling URL, only if the domain exactly matches
+          - subdomain: Allow crawling URLs if they are the same domain or subdomains
+          - sibling:   Allow crawling URLs if they are the same domain or a sibling
+          - all:       Allow crawling all URLs, regardless of domain
 
   -r, --req-per-sec <REQ_PER_SEC>
           Number of requests to make per second
 
           [default: 5]
 
-  -x, --max-concurrent <MAX_CONCURRENT>
-          Maximum number of concurrent requests
+  -l, --limit-concurrent <LIMIT_CONCURRENT>
+          Limit the number of concurrent requests to this value
 
           [default: 5]
 
@@ -117,13 +128,16 @@ Options:
 
           [default: wdict.txt]
 
-      --output-urls
-          Write discovered urls to a file
+      --append
+          Append extracted words to an existing dictionary
 
-      --output-urls-file <OUTPUT_URLS_FILE>
-          File to write urls to, json formatted (will be overwritten if it already exists)
+      --output-state
+          Write crawl state to a file
 
-          [default: urls.json]
+      --state-file <STATE_FILE>
+          File to write state, json formatted (will be overwritten if it already exists)
+
+          [default: state-wdict.json]
 
   -h, --help
           Print help (see a summary with '-h')
@@ -136,12 +150,6 @@ Options:
 
 ## Lib
 This crate exposes a library, but for the time being, the interfaces should be considered unstable.
-
-## TODO
-A list of ideas for future work:
- - archive mode to crawl and save pages locally
- - build dictionaries from local (archived) pages
- - support different mime types
 
 ## License
 

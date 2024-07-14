@@ -19,5 +19,5 @@ result
 # default dictionary file
 wdict.txt
 
-# default urls file
-urls.json
+# default state file
+state-wdict.json

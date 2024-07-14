@@ -5,6 +5,7 @@ pub enum Error {
     RequestError { why: reqwest::Error },
     UrlParseError { why: url::ParseError },
     RateLimitError { why: ratelimit::Error },
+    SerdeError { why: serde_json::Error },
     StrWhitespaceError,
     EarlyTerminationError,
 }
@@ -34,13 +35,22 @@ impl From<ratelimit::Error> for Error {
     }
 }
 
+impl From<serde_json::Error> for Error {
+    fn from(why: serde_json::Error) -> Error {
+        Error::SerdeError { why }
+    }
+}
+
 impl std::fmt::Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
         let error = match *self {
-            Error::IoError { ref why } => format!("failure in io: {}", why),
-            Error::RequestError { ref why } => format!("failure in request: {}", why),
-            Error::UrlParseError { ref why } => format!("failed to parse URL: {}", why),
-            Error::RateLimitError { ref why } => format!("failure in ratelimit: {}", why),
+            Error::IoError { ref why } => format!("io error: {}", why),
+            Error::RequestError { ref why } => format!("request error: {}", why),
+            Error::UrlParseError { ref why } => format!("url parsing error: {}", why),
+            Error::RateLimitError { ref why } => format!("ratelimit error: {}", why),
+            Error::SerdeError { ref why } => {
+                format!("serde serialize/deserialize error: {}", why)
+            }
             Error::StrWhitespaceError => {
                 format!(
                     "value cannot have leading/trailing whitespace, nor consist of only whitespace"

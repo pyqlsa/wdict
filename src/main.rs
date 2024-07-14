@@ -1,268 +1,33 @@
 //! Simple cli tool to extract words from webpages to build a dictionary.
 //!
-use clap::{Args, Parser, ValueEnum};
-use reqwest::Url;
-use serde::{Deserialize, Serialize};
+use clap::Parser;
 use serde_json;
 use std::io::Write;
-use std::{fs::File, process::exit};
+use std::{fs, process::exit};
 use tokio::signal;
 use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
-use wdict::{
-    url_from_path_str, CrawlMode, CrawlOptions, Crawler, DocQueue, Error, ExtractOptions,
-    Extractor, FilterMode, Shutdown, SitePolicy, UrlDb, WordDb,
-};
-
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-struct Cli {
-    /// Target to initiate crawling.
-    #[command(flatten)]
-    target: Target,
-    /// Limit the depth of crawling urls.
-    #[arg(short, long, default_value_t = 1)]
-    depth: usize,
-    /// Only save words greater than or equal to this value.
-    #[arg(short, long, default_value_t = 3)]
-    min_word_length: usize,
-    /// Include javascript from <script> tags and urls.
-    #[arg(short = 'j', long, default_value_t = false)]
-    inclue_js: bool,
-    /// Include CSS from <style> tags and urls.
-    #[arg(short = 'c', long, default_value_t = false)]
-    inclue_css: bool,
-    /// Filter strategy for words; multiple can be specified (comma separated).
-    #[arg(
-        long,
-        default_value = "none",
-        value_enum,
-        num_args = 1..,
-        value_delimiter = ',',
-    )]
-    filters: Vec<FilterArg>,
-    /// Site policy for discovered urls.
-    #[arg(long, default_value = "same", value_enum)]
-    site_policy: SitePolicyArg,
-    /// Number of requests to make per second.
-    #[arg(short, long, default_value_t = 5)]
-    req_per_sec: u64,
-    /// Maximum number of concurrent requests.
-    #[arg(short = 'x', long, default_value_t = 5)]
-    max_concurrent: usize,
-    /// File to write dictionary to (will be overwritten if it already exists).
-    #[arg(short, long, default_value = "wdict.txt", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    output: String,
-    /// Write discovered urls to a file.
-    #[arg(long, default_value_t = false)]
-    output_urls: bool,
-    /// File to write urls to, json formatted (will be overwritten if it already exists).
-    #[arg(long, default_value = "urls.json", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    output_urls_file: String,
-}
-
-#[derive(Args, Debug, Clone)]
-#[group(required = true, multiple = false)]
-struct Target {
-    /// URL to start crawling from.
-    #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    url: Option<String>,
-
-    /// Pre-canned theme URLs to start crawling from (for fun).
-    #[arg(long, value_enum)]
-    theme: Option<Theme>,
-
-    /// Local file path to start crawling from.
-    #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
-    path: Option<String>,
-}
-
-fn str_not_whitespace(value: &str) -> Result<String, Error> {
-    if value.len() < 1 || value.trim().len() != value.len() {
-        Err(Error::StrWhitespaceError)
-    } else {
-        Ok(value.to_string())
-    }
-}
-
-// Need to wait on https://github.com/clap-rs/clap/issues/2639 before using macros in doc comments
-// so they show up in help; leaving breadcrumbs here in hopes it will eventually come to fruition.
-//
-// #[doc = concat!("description <", some_url!(),">")]
-macro_rules! starwars_url {
-    () => {
-        "https://www.starwars.com/databank"
-    };
-}
-macro_rules! tolkien_url {
-    () => {
-        "https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html"
-    };
-}
-macro_rules! witcher_url {
-    () => {
-        "https://witcher.fandom.com/wiki/Elder_Speech"
-    };
-}
-macro_rules! pokemon_url {
-    () => {
-        "https://www.smogon.com"
-    };
-}
-macro_rules! bebop_url {
-    () => {
-        "https://cowboybebop.fandom.com/wiki/Cowboy_Bebop"
-    };
-}
-macro_rules! greek_url {
-    () => {
-        "https://www.theoi.com"
-    };
-}
-macro_rules! greco_roman_url {
-    () => {
-        "https://www.gutenberg.org/files/22381/22381-h/22381-h.htm"
-    };
-}
-macro_rules! lovecraft_url {
-    () => {
-        "https://www.hplovecraft.com"
-    };
-}
-
-#[derive(ValueEnum, Copy, Debug, Clone)]
-enum Theme {
-    /// Star Wars themed URL <https://www.starwars.com/databank>.
-    StarWars,
-    /// Tolkien themed URL <https://www.quicksilver899.com/Tolkien/Tolkien_Dictionary.html>.
-    Tolkien,
-    /// Witcher themed URL <https://witcher.fandom.com/wiki/Elder_Speech>.
-    Witcher,
-    /// Pokemon themed URL <https://www.smogon.com>.
-    Pokemon,
-    /// Cowboy Bebop themed URL <https://cowboybebop.fandom.com/wiki/Cowboy_Bebop>.
-    Bebop,
-    /// Greek Mythology themed URL <https://www.theoi.com>.
-    Greek,
-    /// Greek and Roman Mythology themed URL <https://www.gutenberg.org/files/22381/22381-h/22381-h.htm>.
-    GrecoRoman,
-    /// H.P. Lovecraft themed URL <https://www.hplovecraft.com>.
-    Lovecraft,
-}
-
-impl Theme {
-    /// Get url string for the theme.
-    fn as_str(&self) -> &str {
-        match self {
-            Self::StarWars => starwars_url!(),
-            Self::Tolkien => tolkien_url!(),
-            Self::Witcher => witcher_url!(),
-            Self::Pokemon => pokemon_url!(),
-            Self::Bebop => bebop_url!(),
-            Self::Greek => greek_url!(),
-            Self::GrecoRoman => greco_roman_url!(),
-            Self::Lovecraft => lovecraft_url!(),
-        }
-    }
-}
-
-#[derive(ValueEnum, Copy, Debug, Clone)]
-enum FilterArg {
-    /// Transform unicode according to <https://github.com/kornelski/deunicode>.
-    Deunicode,
-    /// Transform unicode according to <https://github.com/null8626/decancer>.
-    Decancer,
-    /// Ignore words that consist of all numbers.
-    AllNumbers,
-    /// Ignore words that contain any number.
-    AnyNumbers,
-    /// Ignore words that contain no numbers.
-    NoNumbers,
-    /// Keep only words that exclusively contain numbers.
-    OnlyNumbers,
-    /// Ignore words that consist of all ascii characters.
-    AllAscii,
-    /// Ignore words that contain any ascii character.
-    AnyAscii,
-    /// Ignore words that contain no ascii characters.
-    NoAscii,
-    /// Keep only words that exclusively contain ascii characters.
-    OnlyAscii,
-    /// Leave the word as-is.
-    None,
-}
-
-impl FilterArg {
-    /// Get filter mode from arg; exists just to de-couple lib from clap.
-    fn to_mode(&self) -> FilterMode {
-        match self {
-            Self::Deunicode => FilterMode::Deunicode,
-            Self::Decancer => FilterMode::Decancer,
-            Self::AllNumbers => FilterMode::AllNumbers,
-            Self::AnyNumbers => FilterMode::AnyNumbers,
-            Self::NoNumbers => FilterMode::NoNumbers,
-            Self::OnlyNumbers => FilterMode::OnlyNumbers,
-            Self::AllAscii => FilterMode::AllAscii,
-            Self::AnyAscii => FilterMode::AnyAscii,
-            Self::NoAscii => FilterMode::NoAscii,
-            Self::OnlyAscii => FilterMode::OnlyAscii,
-            Self::None => FilterMode::None,
-        }
-    }
-}
-
-/// Convert a Vector of FilterArg to a Vector of FilterMode.
-fn to_modes(v: Vec<FilterArg>) -> Vec<FilterMode> {
-    v.clone().into_iter().map(|f| f.to_mode()).collect()
-}
-
-/// Defines options for crawling sites.
-#[derive(ValueEnum, Copy, Debug, Clone)]
-enum SitePolicyArg {
-    /// Allow crawling urls, only if the domain exactly matches.
-    Same,
-    /// Allow crawling urls if they are the same domain or subdomains.
-    Subdomain,
-    /// Allow crawling urls if they are the same domain or a sibling.
-    Sibling,
-    /// Allow crawling all urls, regardless of domain.
-    All,
-}
-
-impl SitePolicyArg {
-    /// Get site policy from arg; exists just to de-couple lib from clap.
-    fn to_mode(&self) -> SitePolicy {
-        match self {
-            Self::Same => SitePolicy::Same,
-            Self::Subdomain => SitePolicy::Subdomain,
-            Self::Sibling => SitePolicy::Sibling,
-            Self::All => SitePolicy::All,
-        }
-    }
-}
-
-/// Helper for json output url file.
-#[derive(Serialize, Deserialize, Debug)]
-struct OutputUrls {
-    visited: Vec<String>,
-    unvisited: Vec<String>,
-    skipped: Vec<String>,
-    errored: Vec<String>,
-}
+use wdict::cli::{self, Cli, FilterArg, State};
+use wdict::collections::{DocQueue, UrlDb, WordDb};
+use wdict::crawl::{CrawlMode, CrawlOptions, Crawler};
+use wdict::extract::{ExtractOptions, Extractor};
+use wdict::{Error, Shutdown};
 
 /// Wait for thread handles to complete and process outputs.
 async fn wait_for_it(
-    h1: JoinHandle<Result<(), Error>>,
+    h1: JoinHandle<Result<usize, Error>>,
     h2: JoinHandle<Result<(), Error>>,
-) -> Result<(), Error> {
+) -> Result<usize, Error> {
+    let mut depth_reached = 0;
     let (r1, r2) = tokio::join!(h1, h2);
     match r1 {
-        Ok(res) => {
-            if let Err(err) = res {
+        Ok(res) => match res {
+            Err(err) => {
                 eprintln!("unexpected error while crawling {}", err);
             }
-        }
+            Ok(i) => depth_reached = i,
+        },
         Err(err) => {
             eprintln!("unexpected error while joining threads {}", err);
         }
@@ -277,53 +42,29 @@ async fn wait_for_it(
             eprintln!("unexpected error while joining threads {}", err);
         }
     }
-    Ok(())
-}
-
-/// Helper for url parsing, predominantly to squash errors.
-fn parse_url(url_str: &str) -> Result<Url, ()> {
-    let res = Url::parse(url_str);
-    match res {
-        Err(e) => {
-            eprintln!("error parsing url {}: {}", url_str, e);
-            Err(())
-        }
-        Ok(u) => Ok(u),
-    }
-}
-
-/// Helper for parsing a Target into a Url.
-fn parse_target(t: &Target) -> Result<Url, ()> {
-    if let Some(url_str) = t.url.as_deref() {
-        return parse_url(url_str);
-    }
-
-    if let Some(t) = t.theme {
-        return parse_url(t.as_str());
-    }
-
-    if let Some(p) = t.path.as_deref() {
-        let res = url_from_path_str(&p);
-        match res {
-            Err(e) => {
-                eprintln!("error parsing path {} as url: {}", p, e);
-            }
-            Ok(u) => {
-                return parse_url(&u.as_str());
-            }
-        }
-    }
-
-    return Err(());
+    Ok(depth_reached)
 }
 
 /// Main function.
 #[tokio::main]
 async fn main() -> Result<(), Error> {
-    let args = Cli::parse();
-    let target_arg = &args.target;
+    let mut args = Cli::parse();
 
-    let url_res = parse_target(&target_arg);
+    if args.target.resume || args.target.resume_strict {
+        println!(
+            "resuming from state '{}' and dictionary '{}'",
+            args.state_file, args.output
+        );
+        println!();
+    }
+
+    let state_res = cli::parse_state(&args);
+    if let Err(_) = state_res {
+        exit(1);
+    }
+    let mut in_state = state_res.unwrap();
+
+    let url_res = cli::parse_url(in_state.starting_url.as_str());
     if let Err(_) = url_res {
         exit(1);
     }
@@ -334,40 +75,60 @@ async fn main() -> Result<(), Error> {
     } else {
         CrawlMode::Web
     };
+
+    if args.target.resume_strict {
+        args.depth = in_state.depth;
+        args.include_js = in_state.include_js;
+        args.include_css = in_state.include_css;
+        args.site_policy = in_state.site_policy;
+        args.req_per_sec = in_state.req_per_sec;
+        args.limit_concurrent = in_state.limit_concurrent;
+        args.min_word_length = in_state.min_word_length;
+        args.max_word_length = in_state.max_word_length;
+        args.filters = in_state.filters.drain(0..).collect();
+    }
+
     println!(
         "using '{}' as target with crawl mode: {}",
         &url.as_str(),
         crawl_mode
     );
+    println!();
 
     let (notify_shutdown, _) = broadcast::channel(1);
     let copts = CrawlOptions::new(
-        url,
+        &url,
         args.depth,
-        args.inclue_js,
-        args.inclue_css,
+        args.include_js,
+        args.include_css,
         args.site_policy.to_mode(),
         args.req_per_sec,
-        args.max_concurrent,
+        args.limit_concurrent,
         crawl_mode,
     );
     let eopts = ExtractOptions::new(
         args.min_word_length,
-        args.inclue_js,
-        args.inclue_css,
-        to_modes(args.filters),
+        args.max_word_length,
+        args.include_js,
+        args.include_css,
+        FilterArg::to_modes(&args.filters),
     );
 
     let queue: DocQueue = DocQueue::new();
     let (q1, q2) = (queue.clone(), queue.clone());
 
     let urldb: UrlDb = UrlDb::new();
-    let u = urldb.clone();
+    let mut u = urldb.clone();
+    cli::fill_urldb_from_state(&mut u, &mut in_state); // resume
 
     let words = WordDb::new();
-    let w = words.clone();
+    let mut w = words.clone();
+    if args.target.resume || args.target.resume_strict || args.append {
+        cli::fill_worddb_from_file(&mut w, &args.output);
+    }
 
     let mut crawler = Crawler::new(copts, q1, u, Shutdown::new(notify_shutdown.subscribe()))?;
+    crawler.set_depth(in_state.depth_reached); // resume
     let mut extractor = Extractor::new(eopts, q2, w);
 
     let h1 = tokio::spawn(async move { crawler.crawl().await });
@@ -375,6 +136,7 @@ async fn main() -> Result<(), Error> {
     let sig_handle = tokio::spawn(async move {
         tokio::select! {
             _ = signal::ctrl_c() => {
+                println!();
                 println!("shutting down...");
                 // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
                 // receive the shutdown signal and can exit
@@ -383,8 +145,13 @@ async fn main() -> Result<(), Error> {
         }
     });
 
-    if let Err(err) = wait_for_it(h1, h2).await {
-        eprintln!("{}", err);
+    let mut depth_reached = 0;
+    let res = wait_for_it(h1, h2).await;
+    match res {
+        Err(err) => {
+            eprintln!("{}", err);
+        }
+        Ok(i) => depth_reached = i,
     }
 
     // cleanup if we weren't interrupted
@@ -395,10 +162,11 @@ async fn main() -> Result<(), Error> {
     let len_urls = urldb.num_visited_urls();
     let len_words = words.len();
     println!();
+    println!("reached depth: {}", depth_reached);
     println!("unique words: {}", len_words);
     println!("visited urls: {}", len_urls);
 
-    let mut file = File::create(args.output.clone()).expect("Error creating dictionary file");
+    let mut file = fs::File::create(args.output.clone()).expect("Error creating dictionary file");
     words.iter().for_each(|word| {
         let line = format!("{}\n", word);
         file.write_all(line.as_bytes())
@@ -406,21 +174,33 @@ async fn main() -> Result<(), Error> {
     });
     println!("dictionary written to: {}", args.output);
 
-    if args.output_urls {
-        let out_urls = OutputUrls {
-            visited: urldb.visited_urls(),
-            unvisited: urldb.unvisited_urls(),
-            skipped: urldb.skipped_urls(),
-            errored: urldb.errored_urls(),
+    if args.output_state {
+        let out_state = State {
+            starting_url: url.to_string(),
+            depth_reached,
+            visited: urldb.visited_urls_iter().collect(),
+            staged: urldb.staged_urls_iter().collect(),
+            unvisited: urldb.unvisited_urls_iter().collect(),
+            skipped: urldb.skipped_urls_iter().collect(),
+            errored: urldb.errored_urls_iter().collect(),
+            depth: args.depth,
+            filters: args.filters,
+            include_css: args.include_css,
+            include_js: args.include_js,
+            req_per_sec: args.req_per_sec,
+            limit_concurrent: args.limit_concurrent,
+            min_word_length: args.min_word_length,
+            max_word_length: args.max_word_length,
+            site_policy: args.site_policy,
         };
-        let url_file = args.output_urls_file;
-        if let Ok(j) = serde_json::to_string_pretty(&out_urls) {
-            let mut file = File::create(url_file.clone()).expect("Error creating urls file");
+        let url_file = args.state_file;
+        if let Ok(j) = serde_json::to_string_pretty(&out_state) {
+            let mut file = fs::File::create(url_file.clone()).expect("Error creating state file");
             file.write_all(j.as_bytes())
-                .expect("Error writing urls to file");
-            println!("urls written to file: {}", url_file);
+                .expect("Error writing state to file");
+            println!("state written to file: {}", url_file);
         } else {
-            eprintln!("Error serializing output urls json")
+            eprintln!("Error serializing output state json")
         }
     }
     println!();

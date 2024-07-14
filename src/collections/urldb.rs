@@ -18,7 +18,7 @@ impl UrlDb {
     }
 
     /// Returns an iterator over the urls that were discovered and visited.
-    fn filter_visited_urls(&self) -> impl Iterator<Item = String> {
+    pub fn visited_urls_iter(&self) -> impl Iterator<Item = String> {
         let hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -29,8 +29,20 @@ impl UrlDb {
             .map(|(k, _v)| k)
     }
 
+    /// Returns an iterator over the urls that are currently staged.
+    pub fn staged_urls_iter(&self) -> impl Iterator<Item = String> {
+        let hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        hm.clone()
+            .into_iter()
+            .filter(|(_k, v)| *v == Status::Staged)
+            .map(|(k, _v)| k)
+    }
+
     /// Returns an iterator over the urls that were discovered, but unvisited.
-    fn filter_unvisited_urls(&self) -> impl Iterator<Item = String> {
+    pub fn unvisited_urls_iter(&self) -> impl Iterator<Item = String> {
         let hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -42,7 +54,7 @@ impl UrlDb {
     }
 
     /// Returns an iterator over the urls that were discovered, but skipped.
-    fn filter_skipped_urls(&self) -> impl Iterator<Item = String> {
+    pub fn skipped_urls_iter(&self) -> impl Iterator<Item = String> {
         let hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -55,7 +67,7 @@ impl UrlDb {
 
     /// Returns an iterator over the urls that were discovered, but encountered and error while
     /// visiting.
-    fn filter_errored_urls(&self) -> impl Iterator<Item = String> {
+    pub fn errored_urls_iter(&self) -> impl Iterator<Item = String> {
         let hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -66,44 +78,29 @@ impl UrlDb {
             .map(|(k, _v)| k)
     }
 
-    /// Returns the urls that were visited.
-    pub fn visited_urls(&self) -> Vec<String> {
-        self.filter_visited_urls().collect()
-    }
-
-    /// Returns the urls that were unvisited.
-    pub fn unvisited_urls(&self) -> Vec<String> {
-        self.filter_unvisited_urls().collect()
-    }
-
-    /// Returns the urls that were skipped.
-    pub fn skipped_urls(&self) -> Vec<String> {
-        self.filter_skipped_urls().collect()
-    }
-
-    /// Returns the urls that encountred errors.
-    pub fn errored_urls(&self) -> Vec<String> {
-        self.filter_errored_urls().collect()
-    }
-
     /// Returns the number of urls that were visited.
     pub fn num_visited_urls(&self) -> usize {
-        self.filter_visited_urls().count()
+        self.visited_urls_iter().count()
+    }
+
+    /// Returns the number of urls that were staged.
+    pub fn num_staged_urls(&self) -> usize {
+        self.staged_urls_iter().count()
     }
 
     /// Returns the number of urls that were unvisited.
     pub fn num_unvisited_urls(&self) -> usize {
-        self.filter_unvisited_urls().count()
+        self.unvisited_urls_iter().count()
     }
 
     /// Returns the number of urls that were skipped.
     pub fn num_skipped_urls(&self) -> usize {
-        self.filter_skipped_urls().count()
+        self.skipped_urls_iter().count()
     }
 
     /// Returns the number of urls that encountered an error.
     pub fn num_errored_urls(&self) -> usize {
-        self.filter_errored_urls().count()
+        self.errored_urls_iter().count()
     }
 
     /// Inserts and marks a url as visited.
@@ -113,6 +110,15 @@ impl UrlDb {
             Err(poisoned) => poisoned.into_inner(),
         };
         hm.insert(url.to_owned(), Status::Visited);
+    }
+
+    /// Inserts and marks a url as staged.
+    pub fn mark_staged(&mut self, url: String) -> () {
+        let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        hm.insert(url.to_owned(), Status::Staged);
     }
 
     /// Inserts and marks a url as unvisited.
@@ -151,6 +157,15 @@ impl UrlDb {
         hm.entry(url.clone()).or_insert(Status::Visited);
     }
 
+    /// Inserts and marks a url as staged, only if the url is new.
+    pub fn cond_mark_staged(&mut self, url: String) -> () {
+        let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        hm.entry(url.clone()).or_insert(Status::Staged);
+    }
+
     /// Inserts and marks a url as unvisited, only if the url is new.
     pub fn cond_mark_unvisited(&mut self, url: String) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
@@ -177,13 +192,34 @@ impl UrlDb {
         };
         hm.entry(url.clone()).or_insert(Status::Error);
     }
+
+    /// Move all unvisited urls onto the stage.
+    pub fn stage_unvisited_urls(&mut self) {
+        let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        for (k, _v) in hm
+            .clone()
+            .into_iter()
+            .filter(|(_k, v)| *v == Status::Unvisited)
+        {
+            hm.insert(k, Status::Staged);
+        }
+    }
 }
 
 #[derive(Copy, Debug, Clone)]
 enum Status {
+    /// A Url that was already visited successfully.
     Visited,
+    /// A Url that has not yet been visited, but is about to be.
+    Staged,
+    /// A newly discovered Url that has not yet been processed or visited.
     Unvisited,
+    /// A Url that has been determined to be skipped; ultimately will not be visted.
     Skip,
+    /// A Url of which an error was encountered while attempting to visit.
     Error,
 }
 
@@ -191,6 +227,7 @@ impl PartialEq for Status {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Self::Visited, Self::Visited)
+            | (Self::Staged, Self::Staged)
             | (Self::Unvisited, Self::Unvisited)
             | (Self::Skip, Self::Skip)
             | (Self::Error, Self::Error) => true,

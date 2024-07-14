@@ -1,9 +1,8 @@
-use crate::doc_queue::DocQueue;
+use super::SitePolicy;
+use crate::collections::{DocQueue, UrlDb};
 use crate::error::Error;
-use crate::helpers;
 use crate::shutdown::Shutdown;
-use crate::site::SitePolicy;
-use crate::urldb::UrlDb;
+use crate::utils;
 
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
@@ -70,22 +69,26 @@ impl Crawler {
             limiter,
             shutdown,
         };
-        crawler.urldb.mark_unvisited(String::from(start_url));
+        crawler.urldb.cond_mark_unvisited(String::from(start_url));
         Ok(crawler)
     }
 
-    /// Crawl urls up to a given limit, scraping urls and words from pages.
-    pub async fn crawl(&mut self) -> Result<(), Error> {
-        let semaphore = Arc::new(Semaphore::new(self.opts.max_concurrent()));
+    /// Crawl urls up to a given limit, scraping urls and words from pages;
+    /// returns the maximum depth reached upon success.
+    pub async fn crawl(&mut self) -> Result<usize, Error> {
+        let semaphore = Arc::new(Semaphore::new(self.opts.limit_concurrent()));
         while self.cur_depth < self.opts.depth() {
-            self.cur_depth += 1;
-            if self.urldb.num_unvisited_urls() < 1 {
+            // if staged urls are exhausted, populate stage and ratchet up depth
+            if self.urldb.num_staged_urls() < 1 {
+                self.urldb.stage_unvisited_urls();
+            }
+            if self.urldb.num_staged_urls() < 1 {
                 println!("candidate urls exhausted...");
                 break;
             }
             println!("crawling at depth {}", self.cur_depth);
             let mut jhs = VecDeque::new();
-            for url_str in self.urldb.unvisited_urls() {
+            for url_str in self.urldb.staged_urls_iter() {
                 tokio::select! {
                   _ = async {
                     if let Err(dur) = self.limiter.try_wait() {
@@ -125,10 +128,16 @@ impl Crawler {
             if self.shutdown.is_shutdown() {
                 break;
             }
+            self.cur_depth += 1;
         }
 
         self.docs.push(None);
-        Ok(())
+        Ok(self.cur_depth)
+    }
+
+    /// Force the current crawl depth to be of the given value.
+    pub fn set_depth(&mut self, d: usize) {
+        self.cur_depth = d;
     }
 }
 
@@ -164,7 +173,7 @@ impl Spider {
     async fn crawl_url(&mut self, url_str: &String) -> Result<(), ()> {
         // give us a chance to receive graceful shutdown signal
         tokio::select! {
-          _ = sleep(Duration::from_millis(u64::from(helpers::num_between(20, 120)))) => {}
+          _ = sleep(Duration::from_millis(u64::from(utils::num_between(20, 120)))) => {}
           _ = self.shutdown.recv() => {}
         }
         if self.shutdown.is_shutdown() {
@@ -254,7 +263,7 @@ impl Spider {
                 }
                 Ok(p) => {
                     let child = p.path().display().to_string();
-                    let res = helpers::url_from_path_str(child.as_str());
+                    let res = utils::url_from_path_str(child.as_str());
                     match res {
                         Err(_) => {
                             eprintln!("error parsing path as url: {}", child);
@@ -433,7 +442,7 @@ pub struct CrawlOptions {
     /// Upper limit of requests per second while crawling.
     req_per_sec: u64,
     /// Maximum number of concurrent requests.
-    max_concurrent: usize,
+    limit_concurrent: usize,
     /// Crawl mode.
     mode: CrawlMode,
 }
@@ -441,23 +450,23 @@ pub struct CrawlOptions {
 impl CrawlOptions {
     /// Returns a new CrawlOptions instance.
     pub fn new(
-        url: Url,
+        url: &Url,
         depth: usize,
         include_js: bool,
         include_css: bool,
         site: SitePolicy,
         req_per_sec: u64,
-        max_concurrent: usize,
+        limit_concurrent: usize,
         mode: CrawlMode,
     ) -> Self {
         Self {
-            url,
+            url: url.clone(),
             depth,
             include_js,
             include_css,
             site,
             req_per_sec,
-            max_concurrent,
+            limit_concurrent,
             mode,
         }
     }
@@ -488,8 +497,8 @@ impl CrawlOptions {
     }
 
     /// Returns maximum number of concurrent requests allowed.
-    pub fn max_concurrent(&self) -> usize {
-        self.max_concurrent
+    pub fn limit_concurrent(&self) -> usize {
+        self.limit_concurrent
     }
 
     /// Returns the configured site policy for visiting discovered URLs.

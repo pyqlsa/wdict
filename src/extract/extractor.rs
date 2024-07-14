@@ -1,8 +1,7 @@
-use crate::doc_queue::DocQueue;
+use super::FilterMode;
+use crate::collections::{DocQueue, WordDb};
 use crate::error::Error;
-use crate::filter::FilterMode;
-use crate::helpers;
-use crate::worddb::WordDb;
+use crate::utils;
 
 use scraper::{node::Node, Html};
 use tokio::time::{sleep, Duration};
@@ -24,10 +23,7 @@ impl Extractor {
     pub async fn parse_from_queue(&mut self) -> Result<(), Error> {
         sleep(Duration::from_millis(500)).await;
         loop {
-            sleep(Duration::from_millis(u64::from(helpers::num_between(
-                10, 30,
-            ))))
-            .await;
+            sleep(Duration::from_millis(u64::from(utils::num_between(10, 30)))).await;
             if self.docs.is_empty() {
                 continue;
             }
@@ -87,7 +83,9 @@ impl Extractor {
                 for filter in self.opts.filters() {
                     fintext = filter.filter_str(&fintext);
                 }
-                if fintext.len() >= self.opts.min_word_length() {
+                if fintext.len() >= self.opts.min_word_length()
+                    && fintext.len() <= self.opts.max_word_length()
+                {
                     self.words.insert(fintext);
                 }
             }
@@ -100,6 +98,8 @@ impl Extractor {
 pub struct ExtractOptions {
     /// Only save words greater than or equal to this value.
     min_word_length: usize,
+    /// Only save words less than or equal to this value.
+    max_word_length: usize,
     /// Include javascript from html pages.
     include_js: bool,
     /// Include css from html pages.
@@ -112,12 +112,14 @@ impl ExtractOptions {
     /// Returns a new ExtractOptions instance.
     pub fn new(
         min_word_length: usize,
+        max_word_length: usize,
         include_js: bool,
         include_css: bool,
         filters: Vec<FilterMode>,
     ) -> Self {
         Self {
             min_word_length,
+            max_word_length,
             include_js,
             include_css,
             filters,
@@ -127,6 +129,11 @@ impl ExtractOptions {
     /// Returns the minimum word length for saving words to the wordslist.
     pub fn min_word_length(&self) -> usize {
         self.min_word_length
+    }
+
+    /// Returns the maximum word length for saving words to the wordslist.
+    pub fn max_word_length(&self) -> usize {
+        self.max_word_length
     }
 
     /// Returns whether or not configuration dictates  to include js.
