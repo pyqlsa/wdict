@@ -3,6 +3,7 @@ use std::string::String;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Provides a FIFO queue for documents.
+#[derive(Debug)]
 pub struct DocQueue(Arc<Mutex<VecDeque<Option<String>>>>);
 
 impl Clone for DocQueue {

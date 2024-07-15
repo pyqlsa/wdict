@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Stores unique words.
+#[derive(Debug)]
 pub struct WordDb(Arc<Mutex<HashMap<String, bool>>>);
 
 impl Clone for WordDb {

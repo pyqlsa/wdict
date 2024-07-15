@@ -1,9 +1,3 @@
-use super::SitePolicy;
-use crate::collections::{DocQueue, UrlDb};
-use crate::error::Error;
-use crate::shutdown::Shutdown;
-use crate::utils;
-
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
@@ -13,6 +7,14 @@ use std::{fs, io::Read};
 use tokio::sync::Semaphore;
 use tokio::time::{sleep, Duration};
 
+use crate::collections::{DocQueue, UrlDb};
+use crate::error::Error;
+use crate::extract::Extractor;
+use crate::shutdown::Shutdown;
+use crate::utils;
+
+use super::SitePolicy;
+
 /// Crawls websites, gathering urls from pages.
 pub struct Crawler {
     client: Client,
@@ -21,6 +23,7 @@ pub struct Crawler {
     urldb: UrlDb,
     cur_depth: usize,
     limiter: Ratelimiter,
+    extractor: Extractor,
     /// Listen for shutdown notifications.
     ///
     /// A wrapper around the `broadcast::Receiver` to be paired with a sender.
@@ -33,13 +36,14 @@ impl Crawler {
         opts: CrawlOptions,
         docs: DocQueue,
         urldb: UrlDb,
+        extractor: Extractor,
         shutdown: Shutdown,
     ) -> Result<Self, Error> {
         let client = Client::builder()
-            .connect_timeout(std::time::Duration::from_secs(5))
-            .timeout(std::time::Duration::from_secs(10))
+            .connect_timeout(Duration::from_secs(5))
+            .timeout(Duration::from_secs(10))
             .build()?;
-        Self::new_with_client(client, opts, docs, urldb, shutdown)
+        Self::new_with_client(client, opts, docs, urldb, extractor, shutdown)
     }
 
     /// Returns a new Crawler instance with the provided `reqwest::Client`.
@@ -48,6 +52,7 @@ impl Crawler {
         opts: CrawlOptions,
         docs: DocQueue,
         urldb: UrlDb,
+        extractor: Extractor,
         shutdown: Shutdown,
     ) -> Result<Self, Error> {
         let tokens = if opts.requests_per_second() < 1 {
@@ -67,6 +72,7 @@ impl Crawler {
             cur_depth: 0,
             client,
             limiter,
+            extractor,
             shutdown,
         };
         crawler.urldb.cond_mark_unvisited(String::from(start_url));
@@ -89,42 +95,30 @@ impl Crawler {
             println!("crawling at depth {}", self.cur_depth);
             let mut jhs = VecDeque::new();
             for url_str in self.urldb.staged_urls_iter() {
-                tokio::select! {
-                  _ = async {
-                    if let Err(dur) = self.limiter.try_wait() {
-                        sleep(dur).await;
-                    }
-                    // soften how we hit the limiter
-                    let millis = 1000 / self.opts.req_per_sec;
-                    sleep(Duration::from_millis(millis)).await;
-                  } => {}
-                  _ = self.shutdown.recv() => {}
-                }
-                if self.shutdown.is_shutdown() {
+                if self.observe_limit().await {
                     break;
                 }
 
-                let mut spider = Spider::new(
-                    self.client.clone(),
-                    self.opts.clone(),
-                    self.docs.clone(),
-                    self.urldb.clone(),
-                    self.shutdown.clone(),
-                );
+                let mut spider = self.build_spider();
+                let mut e = self.extractor.clone();
                 let sem = semaphore.clone();
                 let jh = tokio::spawn(async move {
                     let permit = sem.acquire().await.unwrap();
-                    let res = spider.crawl_url(&url_str).await;
+                    spider.crawl_url(&url_str).await;
+                    e.poll_queue().await;
                     drop(permit);
-                    res
                 });
                 jhs.push_back(jh);
             }
+
             while !jhs.is_empty() {
                 if let Some(jh) = jhs.pop_front() {
-                    let _ = tokio::join!(jh);
+                    //let _ = tokio::join!(jh);
+                    let _ = jh.await;
                 }
             }
+            // outer shutdown check before depth step, as we may have been
+            // shutdown before completing current depth
             if self.shutdown.is_shutdown() {
                 break;
             }
@@ -135,6 +129,35 @@ impl Crawler {
         Ok(self.cur_depth)
     }
 
+    // Observes configured rate limit and returns whether or not we've been
+    // shutdown.
+    async fn observe_limit(&mut self) -> bool {
+        tokio::select! {
+          _ = async {
+            if let Err(dur) = self.limiter.try_wait() {
+                sleep(dur).await;
+            }
+            // soften how we hit the limiter
+            let millis = 1000 / self.opts.req_per_sec;
+            sleep(Duration::from_millis(millis)).await;
+          } => {}
+          _ = self.shutdown.recv() => {}
+        }
+
+        self.shutdown.is_shutdown()
+    }
+
+    // Builds and returns a new spider.
+    fn build_spider(&self) -> Spider {
+        Spider::new(
+            self.client.clone(),
+            self.opts.clone(),
+            self.docs.clone(),
+            self.urldb.clone(),
+            self.shutdown.clone(),
+        )
+    }
+
     /// Force the current crawl depth to be of the given value.
     pub fn set_depth(&mut self, d: usize) {
         self.cur_depth = d;
@@ -142,6 +165,7 @@ impl Crawler {
 }
 
 /// Crawls websites, gathering urls from pages.
+#[derive(Debug, Clone)]
 struct Spider {
     client: Client,
     opts: CrawlOptions,
@@ -170,22 +194,22 @@ impl Spider {
             shutdown,
         }
     }
-    async fn crawl_url(&mut self, url_str: &String) -> Result<(), ()> {
+
+    async fn crawl_url(&mut self, url_str: &String) {
         // give us a chance to receive graceful shutdown signal
         tokio::select! {
           _ = sleep(Duration::from_millis(u64::from(utils::num_between(20, 120)))) => {}
           _ = self.shutdown.recv() => {}
         }
         if self.shutdown.is_shutdown() {
-            //return Err(Error::EarlyTerminationError);
-            return Err(());
+            return;
         }
 
         let result = Url::parse(url_str.as_str());
         if let Err(e) = result {
             eprintln!("not a url: {}", e);
             self.urldb.mark_errored(url_str.clone());
-            return Ok(());
+            return;
         }
         let url = result.unwrap();
 
@@ -193,7 +217,6 @@ impl Spider {
             CrawlMode::Web => self.crawl_web(&url).await,
             CrawlMode::Local => self.crawl_local(&url).await,
         }
-        Ok(())
     }
 
     async fn crawl_local(&mut self, url: &Url) {
@@ -214,6 +237,7 @@ impl Spider {
         } else if meta.is_dir() {
             self.handle_local_dir(&url);
         } else {
+            // ¯\_(ツ)_/¯
             return;
         }
     }

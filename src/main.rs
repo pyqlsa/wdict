@@ -14,37 +14,6 @@ use wdict::crawl::{CrawlMode, CrawlOptions, Crawler};
 use wdict::extract::{ExtractOptions, Extractor};
 use wdict::{Error, Shutdown};
 
-/// Wait for thread handles to complete and process outputs.
-async fn wait_for_it(
-    h1: JoinHandle<Result<usize, Error>>,
-    h2: JoinHandle<Result<(), Error>>,
-) -> Result<usize, Error> {
-    let mut depth_reached = 0;
-    let (r1, r2) = tokio::join!(h1, h2);
-    match r1 {
-        Ok(res) => match res {
-            Err(err) => {
-                eprintln!("unexpected error while crawling {}", err);
-            }
-            Ok(i) => depth_reached = i,
-        },
-        Err(err) => {
-            eprintln!("unexpected error while joining threads {}", err);
-        }
-    }
-    match r2 {
-        Ok(res) => {
-            if let Err(err) = res {
-                eprintln!("unexpected error while extracting {}", err);
-            }
-        }
-        Err(err) => {
-            eprintln!("unexpected error while joining threads {}", err);
-        }
-    }
-    Ok(depth_reached)
-}
-
 /// Main function.
 #[tokio::main]
 async fn main() -> Result<(), Error> {
@@ -121,18 +90,17 @@ async fn main() -> Result<(), Error> {
     let mut u = urldb.clone();
     cli::fill_urldb_from_state(&mut u, &mut in_state); // resume
 
-    let words = WordDb::new();
+    let words: WordDb = WordDb::new();
     let mut w = words.clone();
     if args.target.resume || args.target.resume_strict || args.append {
         cli::fill_worddb_from_file(&mut w, &args.output);
     }
 
-    let mut crawler = Crawler::new(copts, q1, u, Shutdown::new(notify_shutdown.subscribe()))?;
+    let e = Extractor::new(eopts, q2, w);
+    let mut crawler = Crawler::new(copts, q1, u, e, Shutdown::new(notify_shutdown.subscribe()))?;
     crawler.set_depth(in_state.depth_reached); // resume
-    let mut extractor = Extractor::new(eopts, q2, w);
 
-    let h1 = tokio::spawn(async move { crawler.crawl().await });
-    let h2 = tokio::spawn(async move { extractor.parse_from_queue().await });
+    let crawl_handle = tokio::spawn(async move { crawler.crawl().await });
     let sig_handle = tokio::spawn(async move {
         tokio::select! {
             _ = signal::ctrl_c() => {
@@ -145,14 +113,8 @@ async fn main() -> Result<(), Error> {
         }
     });
 
-    let mut depth_reached = 0;
-    let res = wait_for_it(h1, h2).await;
-    match res {
-        Err(err) => {
-            eprintln!("{}", err);
-        }
-        Ok(i) => depth_reached = i,
-    }
+    // wait for all the crawling to complete
+    let depth_reached = wait_for_crawl(crawl_handle).await;
 
     // cleanup if we weren't interrupted
     if !sig_handle.is_finished() {
@@ -206,4 +168,24 @@ async fn main() -> Result<(), Error> {
     println!();
 
     Ok(())
+}
+
+/// Wait for crawl thread handle to complete; retrned the max depth_reached
+/// while crawling.
+async fn wait_for_crawl(h: JoinHandle<Result<usize, Error>>) -> usize {
+    let mut depth_reached = 0;
+    //let (r1,) = tokio::join!(h1);
+    let r1 = h.await;
+    match r1 {
+        Ok(res) => match res {
+            Err(err) => {
+                eprintln!("unexpected error while crawling {}", err);
+            }
+            Ok(i) => depth_reached = i,
+        },
+        Err(err) => {
+            eprintln!("unexpected error while joining threads {}", err);
+        }
+    }
+    depth_reached
 }

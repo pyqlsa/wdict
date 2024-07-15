@@ -1,11 +1,76 @@
+use clap::builder::ValueParser;
 use reqwest::Url;
 use std::fs;
 use std::io::{self, BufRead};
 
 use crate::collections::{UrlDb, WordDb};
+use crate::error::Error;
 use crate::utils;
 
-use crate::cli::args::{Cli, State};
+use super::{Cli, FilterArg, SitePolicyArg};
+
+/// Helper for json output URL file.
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct State {
+    pub starting_url: String,
+    pub depth_reached: usize,
+    pub visited: Vec<String>,
+    pub staged: Vec<String>,
+    pub unvisited: Vec<String>,
+    pub skipped: Vec<String>,
+    pub errored: Vec<String>,
+    pub site_policy: SitePolicyArg,
+    pub filters: Vec<FilterArg>,
+    pub depth: usize,
+    pub include_js: bool,
+    pub include_css: bool,
+    pub min_word_length: usize,
+    pub max_word_length: usize,
+    pub req_per_sec: u64,
+    pub limit_concurrent: usize,
+}
+
+impl State {
+    /// Returns a new UrlDb instance.
+    pub fn new(url: &str) -> Self {
+        Self {
+            starting_url: url.to_string(),
+            depth_reached: 0,
+            visited: Vec::new(),
+            staged: Vec::new(),
+            unvisited: Vec::new(),
+            skipped: Vec::new(),
+            errored: Vec::new(),
+            site_policy: SitePolicyArg::Same,
+            filters: Vec::new(),
+            depth: 1,
+            include_js: false,
+            include_css: false,
+            min_word_length: 3,
+            max_word_length: usize::MAX,
+            req_per_sec: 5,
+            limit_concurrent: 5,
+        }
+    }
+    pub fn new_from_file(file: &str) -> Result<State, Error> {
+        let contents = fs::read_to_string(file)?;
+        let state: State = serde_json::from_str(contents.as_str())?;
+
+        Ok(state)
+    }
+}
+
+pub fn str_not_whitespace_parser() -> ValueParser {
+    ValueParser::new(str_not_whitespace)
+}
+
+pub fn str_not_whitespace(value: &str) -> Result<String, Error> {
+    if value.len() < 1 || value.trim().len() != value.len() {
+        Err(Error::StrWhitespaceError)
+    } else {
+        Ok(value.trim().to_string())
+    }
+}
 
 /// Helper for url parsing, predominantly to squash errors.
 pub fn parse_url(url_str: &str) -> Result<Url, ()> {

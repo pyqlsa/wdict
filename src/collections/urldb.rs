@@ -2,6 +2,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Stores urls, tracking whether or not they have been visited.
+#[derive(Debug)]
 pub struct UrlDb(Arc<Mutex<HashMap<String, Status>>>);
 
 impl Clone for UrlDb {

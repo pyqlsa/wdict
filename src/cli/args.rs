@@ -1,14 +1,11 @@
-//! Simple cli tool to extract words from webpages to build a dictionary.
-//!
 use clap::{Args, Parser, ValueEnum};
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
-use serde_json;
-use std::fs;
 
 use crate::crawl::SitePolicy;
-use crate::error::Error;
 use crate::extract::FilterMode;
+
+use super::helpers;
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -50,7 +47,7 @@ pub struct Cli {
     #[arg(short = 'l', long, default_value_t = 5)]
     pub limit_concurrent: usize,
     /// File to write dictionary to (will be overwritten if it already exists).
-    #[arg(short, long, default_value = "wdict.txt", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    #[arg(short, long, default_value = "wdict.txt", value_parser = helpers::str_not_whitespace_parser())]
     pub output: String,
     /// Append extracted words to an existing dictionary.
     #[arg(long, default_value_t = false)]
@@ -59,7 +56,7 @@ pub struct Cli {
     #[arg(long, default_value_t = false)]
     pub output_state: bool,
     /// File to write state, json formatted (will be overwritten if it already exists).
-    #[arg(long, default_value = "state-wdict.json", value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    #[arg(long, default_value = "state-wdict.json", value_parser = helpers::str_not_whitespace_parser())]
     pub state_file: String,
 }
 
@@ -67,7 +64,7 @@ pub struct Cli {
 #[group(required = true, multiple = false)]
 pub struct Target {
     /// URL to start crawling from.
-    #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    #[arg(short, long, value_parser = helpers::str_not_whitespace_parser())]
     pub url: Option<String>,
 
     /// Pre-canned theme URLs to start crawling from (for fun).
@@ -75,7 +72,7 @@ pub struct Target {
     pub theme: Option<Theme>,
 
     /// Local file path to start crawling from.
-    #[arg(short, long, value_parser = clap::builder::ValueParser::new(str_not_whitespace))]
+    #[arg(short, long, value_parser = helpers::str_not_whitespace_parser())]
     pub path: Option<String>,
 
     /// Resume crawling from a previous run;
@@ -89,14 +86,6 @@ pub struct Target {
     /// 'strict' enforces that all arguments from the state file are observed.
     #[arg(long, default_value_t = false)]
     pub resume_strict: bool,
-}
-
-fn str_not_whitespace(value: &str) -> Result<String, Error> {
-    if value.len() < 1 || value.trim().len() != value.len() {
-        Err(Error::StrWhitespaceError)
-    } else {
-        Ok(value.trim().to_string())
-    }
 }
 
 // Need to wait on https://github.com/clap-rs/clap/issues/2639 before using macros in doc comments
@@ -346,56 +335,5 @@ impl<'de> Deserialize<'de> for SitePolicyArg {
             "all" => Ok(Self::All),
             _ => Err(serde::de::Error::custom("Expected a valid site policy arg")),
         }
-    }
-}
-
-/// Helper for json output URL file.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct State {
-    pub starting_url: String,
-    pub depth_reached: usize,
-    pub visited: Vec<String>,
-    pub staged: Vec<String>,
-    pub unvisited: Vec<String>,
-    pub skipped: Vec<String>,
-    pub errored: Vec<String>,
-    pub site_policy: SitePolicyArg,
-    pub filters: Vec<FilterArg>,
-    pub depth: usize,
-    pub include_js: bool,
-    pub include_css: bool,
-    pub min_word_length: usize,
-    pub max_word_length: usize,
-    pub req_per_sec: u64,
-    pub limit_concurrent: usize,
-}
-
-impl State {
-    /// Returns a new UrlDb instance.
-    pub fn new(url: &str) -> Self {
-        Self {
-            starting_url: url.to_string(),
-            depth_reached: 0,
-            visited: Vec::new(),
-            staged: Vec::new(),
-            unvisited: Vec::new(),
-            skipped: Vec::new(),
-            errored: Vec::new(),
-            site_policy: SitePolicyArg::Same,
-            filters: Vec::new(),
-            depth: 1,
-            include_js: false,
-            include_css: false,
-            min_word_length: 3,
-            max_word_length: usize::MAX,
-            req_per_sec: 5,
-            limit_concurrent: 5,
-        }
-    }
-    pub fn new_from_file(file: &str) -> Result<State, Error> {
-        let contents = fs::read_to_string(file)?;
-        let state: State = serde_json::from_str(contents.as_str())?;
-
-        Ok(state)
     }
 }

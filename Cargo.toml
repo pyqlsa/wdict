@@ -2,7 +2,7 @@
 name = "wdict"
 authors = ["pyqlsa"]
 description = "Create dictionaries by scraping webpages or crawling local files."
-version = "0.1.15"
+version = "0.1.16"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -11,14 +11,14 @@ repository = "https://github.com/pyqlsa/wdict"
 include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock"]
 
 [dependencies]
-clap = { version = "4.5.8", features = ["derive"] }
+clap = { version = "4.5.9", features = ["derive"] }
 decancer = { version = "3.2.3" }
 deunicode = { version = "1.6.0" }
-psl = { version = "2.1.50" }
+psl = { version = "2.1.52" }
 ratelimit = { version = "0.9.1" }
 reqwest = { version = "0.12.5" }
 scraper = { version = "0.19.0" }
-serde = { version = "1.0.203", features = ["derive"] }
+serde = { version = "1.0.204", features = ["derive"] }
 serde_json = { version = "1.0.120" }
 tokio = { version = "1.38.0", features = ["full"] }
 url = { version = "2.5.2" }

@@ -1,12 +1,13 @@
-use super::FilterMode;
-use crate::collections::{DocQueue, WordDb};
-use crate::error::Error;
-use crate::utils;
-
 use scraper::{node::Node, Html};
 use tokio::time::{sleep, Duration};
 
+use crate::collections::{DocQueue, WordDb};
+use crate::utils;
+
+use super::FilterMode;
+
 /// Extracts words from html documents.
+#[derive(Debug, Clone)]
 pub struct Extractor {
     opts: ExtractOptions,
     docs: DocQueue,
@@ -19,21 +20,15 @@ impl Extractor {
         Self { opts, docs, words }
     }
 
-    /// Parse documents from the provided queue and extract words.
-    pub async fn parse_from_queue(&mut self) -> Result<(), Error> {
-        sleep(Duration::from_millis(500)).await;
-        loop {
-            sleep(Duration::from_millis(u64::from(utils::num_between(10, 30)))).await;
-            if self.docs.is_empty() {
-                continue;
-            }
-            if let Some(doc) = self.docs.pop() {
-                self.words_from_doc(&doc);
-            } else {
-                break;
-            }
+    /// Parse documents from the internal queue and extract words.
+    pub async fn poll_queue(&mut self) {
+        sleep(Duration::from_millis(u64::from(utils::num_between(10, 30)))).await;
+        if self.docs.is_empty() {
+            return;
         }
-        Ok(())
+        if let Some(doc) = self.docs.pop() {
+            self.words_from_doc(&doc);
+        }
     }
 
     /// Extract words from the provided document.

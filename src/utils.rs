@@ -1,8 +1,8 @@
-use crate::error::Error;
-
 use reqwest::Url;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::error::Error;
 
 /// Converts the given path string into a Url.
 pub fn url_from_path_str(path: &str) -> Result<Url, Error> {
