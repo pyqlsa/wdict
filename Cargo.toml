@@ -11,6 +11,7 @@ repository = "https://github.com/pyqlsa/wdict"
 include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock"]
 
 [dependencies]
+bytes = { version = "1.6.1" }
 clap = { version = "4.5.9", features = ["derive"] }
 decancer = { version = "3.2.3" }
 deunicode = { version = "1.6.0" }

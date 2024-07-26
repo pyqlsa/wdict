@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use scraper::{node::Node, Html};
 use tokio::time::{sleep, Duration};
 
@@ -26,14 +27,16 @@ impl Extractor {
         if self.docs.is_empty() {
             return;
         }
-        if let Some(doc) = self.docs.pop() {
-            self.words_from_doc(&doc);
+        if let Some(buf) = self.docs.pop() {
+            self.words_from_doc(&buf);
         }
     }
 
     /// Extract words from the provided document.
-    pub fn words_from_doc(&mut self, document: &String) -> () {
-        let doc = Html::parse_document(&document);
+    pub fn words_from_doc(&mut self, buf: &Bytes) -> () {
+        // TODO: some sort of file type detection
+        let s = String::from_utf8_lossy(&buf).to_string();
+        let doc = Html::parse_document(&s);
         // note: alternatives to getting all text nodes (regardless if script/styel/etc. or not)
         //for text in document.clone().root_element().text() { ...do something... }
         for d in doc.root_element().descendants() {

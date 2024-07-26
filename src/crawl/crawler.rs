@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
@@ -254,15 +255,15 @@ impl Spider {
         }
 
         let mut file = file_res.unwrap();
-        let mut s = String::new();
-        match file.read_to_string(&mut s) {
+        let mut buf = Vec::new();
+        match file.read_to_end(&mut buf) {
             Err(e) => {
                 self.urldb.mark_errored(url.to_string());
                 eprintln!("error reading file {}: {}", display, e);
             }
             Ok(_) => {
                 self.urldb.mark_visited(url.to_string());
-                self.docs.push(Some(s));
+                self.docs.push(Some(Bytes::from(buf)));
             }
         }
     }
@@ -318,8 +319,9 @@ impl Spider {
         let document = self.doc_from_url(&url.as_str().to_string()).await;
         match document {
             Ok(doc) => {
+                let doc_string = String::from_utf8_lossy(&doc).to_string();
                 self.urldb.mark_visited(url.to_string());
-                self.urls_from_doc(&url, &doc);
+                self.urls_from_doc(&url, &doc_string);
                 self.docs.push(Some(doc));
             }
             Err(e) => match e {
@@ -341,7 +343,7 @@ impl Spider {
     }
 
     /// Get an html document from the provided url.
-    async fn doc_from_url(&mut self, url: &String) -> Result<String, Error> {
+    async fn doc_from_url(&mut self, url: &String) -> Result<Bytes, Error> {
         tokio::select! {
             response = self.client.get(url).send() => { Self::handle_response(response).await }
             _ = self.shutdown.recv() => { Err(Error::EarlyTerminationError) }
@@ -350,7 +352,7 @@ impl Spider {
 
     async fn handle_response(
         response: Result<reqwest::Response, reqwest::Error>,
-    ) -> Result<String, Error> {
+    ) -> Result<Bytes, Error> {
         match response {
             Err(e) => {
                 if e.is_status() {
@@ -372,7 +374,16 @@ impl Spider {
                 }
                 Err(Error::RequestError { why: e })
             }
-            Ok(res) => Ok(res.text().await.unwrap()),
+            Ok(res) => {
+                let r = res.bytes().await;
+                match r {
+                    Err(e) => {
+                        eprintln!("error reading request response: {}", e);
+                        Err(Error::RequestError { why: e })
+                    }
+                    Ok(ress) => Ok(ress),
+                }
+            }
         }
     }
 
