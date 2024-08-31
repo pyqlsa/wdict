@@ -15,13 +15,13 @@ fn main() {
     let help_start = readme.find(start_tag).unwrap();
     let help_end = readme.find(end_tag).unwrap();
 
-    println!(
+    eprintln!(
         "Found help section in readme starting at {}, ending at {}",
         help_start, help_end
     );
     assert!(help_start < help_end, "start >= end, not continuing...");
 
-    println!("Getting latest help content...");
+    eprintln!("Getting latest help content...");
     let help_content = get_help();
 
     let readme_begin = &readme[..help_start];
@@ -31,12 +31,12 @@ fn main() {
         readme_begin, start_tag, help_content, end_tag, readme_end
     );
 
-    println!("Writing out final readme...");
+    eprintln!("Writing out final readme...");
     let mut file = fs::File::create(readme_file).expect("Error creating final readme file");
     file.write_all(fin_readme.as_bytes())
         .expect("Failed writing final readme file");
 
-    println!("Final readme written");
+    eprintln!("Final readme written");
 }
 
 fn get_help() -> String {
@@ -55,7 +55,7 @@ fn get_help() -> String {
     // };
     // --- ...so we do this instead to truncate lines w/ just whitepsace
 
-    let mut fin = "".to_owned();
+    let mut fin = String::new();
     let out = cmd.stdout.as_slice();
     for line in out.lines() {
         match line {

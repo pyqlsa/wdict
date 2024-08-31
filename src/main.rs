@@ -20,11 +20,11 @@ async fn main() -> Result<(), Error> {
     let mut args = Cli::parse();
 
     if args.target.resume || args.target.resume_strict {
-        println!(
+        eprintln!(
             "resuming from state '{}' and dictionary '{}'",
             args.state_file, args.output
         );
-        println!();
+        eprintln!();
     }
 
     let state_res = cli::parse_state(&args);
@@ -57,12 +57,12 @@ async fn main() -> Result<(), Error> {
         args.filters = in_state.filters.drain(0..).collect();
     }
 
-    println!(
+    eprintln!(
         "using '{}' as target with crawl mode: {}",
         &url.as_str(),
         crawl_mode
     );
-    println!();
+    eprintln!();
 
     let (notify_shutdown, _) = broadcast::channel(1);
     let copts = CrawlOptions::new(
@@ -104,8 +104,8 @@ async fn main() -> Result<(), Error> {
     let sig_handle = tokio::spawn(async move {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                println!();
-                println!("shutting down...");
+                eprintln!();
+                eprintln!("shutting down...");
                 // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
                 // receive the shutdown signal and can exit
                 drop(notify_shutdown);
@@ -123,18 +123,20 @@ async fn main() -> Result<(), Error> {
 
     let len_urls = urldb.num_visited_urls();
     let len_words = words.len();
-    println!();
-    println!("reached depth: {}", depth_reached);
-    println!("unique words: {}", len_words);
-    println!("visited urls: {}", len_urls);
+    eprintln!();
+    eprintln!("reached depth: {}", depth_reached);
+    eprintln!("unique words: {}", len_words);
+    eprintln!("visited urls: {}", len_urls);
 
     let mut file = fs::File::create(args.output.clone()).expect("Error creating dictionary file");
+    let mut contents = String::new();
     words.iter().for_each(|word| {
         let line = format!("{}\n", word);
-        file.write_all(line.as_bytes())
-            .expect("Error writing to dictionary");
+        contents.push_str(&line);
     });
-    println!("dictionary written to: {}", args.output);
+    file.write_all(contents.as_bytes())
+        .expect("Error writing to dictionary");
+    eprintln!("dictionary written to: {}", args.output);
 
     if args.output_state {
         let out_state = State {
@@ -160,12 +162,12 @@ async fn main() -> Result<(), Error> {
             let mut file = fs::File::create(url_file.clone()).expect("Error creating state file");
             file.write_all(j.as_bytes())
                 .expect("Error writing state to file");
-            println!("state written to file: {}", url_file);
+            eprintln!("state written to file: {}", url_file);
         } else {
             eprintln!("Error serializing output state json")
         }
     }
-    println!();
+    eprintln!();
 
     Ok(())
 }

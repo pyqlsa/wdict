@@ -1,10 +1,10 @@
+use bytes::Bytes;
 use std::collections::VecDeque;
-use std::string::String;
 use std::sync::{Arc, Mutex, MutexGuard};
 
 /// Provides a FIFO queue for documents.
 #[derive(Debug)]
-pub struct DocQueue(Arc<Mutex<VecDeque<Option<String>>>>);
+pub struct DocQueue(Arc<Mutex<VecDeque<Option<Bytes>>>>);
 
 impl Clone for DocQueue {
     /// Returns a clone/handle of the given DocQueue.
@@ -20,8 +20,8 @@ impl DocQueue {
     }
 
     /// Push a document into the queue.
-    pub fn push(&mut self, doc: Option<String>) {
-        let mut queue: MutexGuard<VecDeque<Option<String>>> = match self.0.lock() {
+    pub fn push(&mut self, doc: Option<Bytes>) {
+        let mut queue: MutexGuard<VecDeque<Option<Bytes>>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
@@ -29,8 +29,8 @@ impl DocQueue {
     }
 
     /// Pop a document from the queue.
-    pub fn pop(&mut self) -> Option<String> {
-        let mut queue: MutexGuard<VecDeque<Option<String>>> = match self.0.lock() {
+    pub fn pop(&mut self) -> Option<Bytes> {
+        let mut queue: MutexGuard<VecDeque<Option<Bytes>>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
@@ -44,7 +44,7 @@ impl DocQueue {
 
     /// Return if the queue is empty or not.
     pub fn is_empty(&self) -> bool {
-        let queue: MutexGuard<VecDeque<Option<String>>> = match self.0.lock() {
+        let queue: MutexGuard<VecDeque<Option<Bytes>>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };

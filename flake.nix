@@ -75,13 +75,13 @@
             pushd "${./.}"
 
             for file in ./**/Cargo.toml; do
-              cargo-fmt fmt --manifest-path "''${file}" -- --check
+              ${pkgs.rustfmt}/bin/cargo-fmt fmt --manifest-path "''${file}" -- --check
             done
 
-            nixpkgs-fmt --check .
+            ${pkgs.nixpkgs-fmt}/bin/nixpkgs-fmt --check .
 
             for file in ./scripts/*.sh; do
-              shellcheck --severity=info "''${file}"
+              ${pkgs.shellcheck}/bin/shellcheck --severity=info "''${file}"
             done
 
             popd

@@ -1,8 +1,9 @@
+use bytes::Bytes;
+use infer;
 use scraper::{node::Node, Html};
-use tokio::time::{sleep, Duration};
+use unicode_segmentation::UnicodeSegmentation;
 
 use crate::collections::{DocQueue, WordDb};
-use crate::utils;
 
 use super::FilterMode;
 
@@ -21,19 +22,36 @@ impl Extractor {
     }
 
     /// Parse documents from the internal queue and extract words.
-    pub async fn poll_queue(&mut self) {
-        sleep(Duration::from_millis(u64::from(utils::num_between(10, 30)))).await;
+    pub async fn process_doc_from_queue(&mut self) -> () {
+        //sleep(Duration::from_millis(u64::from(utils::num_between(10, 30)))).await;
         if self.docs.is_empty() {
             return;
         }
-        if let Some(doc) = self.docs.pop() {
-            self.words_from_doc(&doc);
+        if let Some(buf) = self.docs.pop() {
+            self.words_from_doc(&buf);
         }
     }
 
-    /// Extract words from the provided document.
-    pub fn words_from_doc(&mut self, document: &String) -> () {
-        let doc = Html::parse_document(&document);
+    fn words_from_doc(&mut self, buf: &Bytes) -> () {
+        let res = infer::get(buf);
+        match res {
+            Some(kind) => match kind.mime_type() {
+                "text/html" => self.words_from_html(&buf),
+                _ => eprintln!("unsupported mime type: {}", kind),
+            },
+            None => {
+                //eprintln!("failure infering mime type");
+                // attempt as plain text file
+                self.words_from_text(&buf);
+            }
+        }
+    }
+
+    /// Extract words from the provided document, treating bytes buffer as html.
+    fn words_from_html(&mut self, buf: &Bytes) -> () {
+        let s = String::from_utf8_lossy(&buf).to_string();
+        let doc = Html::parse_document(&s);
+        let mut s: String = String::new();
         // note: alternatives to getting all text nodes (regardless if script/styel/etc. or not)
         //for text in document.clone().root_element().text() { ...do something... }
         for d in doc.root_element().descendants() {
@@ -50,40 +68,44 @@ impl Extractor {
                     // if parent node is a script tag, means it should be js
                     "script" => {
                         if self.opts.include_js() {
-                            self.filter_text(&text.text);
+                            s.push_str(&text.text);
                         }
                     }
                     // if parent node is a style tag, means it should be css
                     "style" => {
                         if self.opts.include_css() {
-                            self.filter_text(&text.text);
+                            s.push_str(&text.text);
                         }
                     }
                     // if not ignored, send it
-                    _ => self.filter_text(&text.text),
+                    _ => {
+                        s.push_str(&text.text);
+                    }
                 }
             }
         }
+        self.filter_text(&s);
+    }
+
+    /// Extract words from the provided document, treating bytes buffer as plain text.
+    fn words_from_text(&mut self, buf: &Bytes) -> () {
+        let s = String::from_utf8_lossy(&buf).to_string();
+        self.filter_text(&s);
     }
 
     /// Filter text based on configured filters and capture resulting words.
     fn filter_text(&mut self, text: &str) -> () {
-        let mut tmp = text.to_string();
-        tmp = tmp.to_lowercase();
-        // ignore these characters since we're looking for words
-        tmp = tmp.replace(|c: char| !c.is_alphanumeric(), " ");
-        if tmp.len() > 0 {
-            for w in tmp.split_whitespace() {
-                let mut fintext = w.to_string();
-                for filter in self.opts.filters() {
-                    fintext = filter.filter_str(&fintext);
-                }
-                if fintext.len() >= self.opts.min_word_length()
-                    && fintext.len() <= self.opts.max_word_length()
-                {
-                    self.words.insert(fintext);
-                }
+        for w in text.unicode_words() {
+            let mut fintext = w.to_lowercase();
+            for filter in self.opts.filters() {
+                filter.filter_str(&mut fintext);
             }
+            if fintext.len() < self.opts.min_word_length()
+                || fintext.len() > self.opts.max_word_length()
+            {
+                continue;
+            }
+            self.words.insert(fintext);
         }
     }
 }

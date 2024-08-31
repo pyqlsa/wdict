@@ -32,11 +32,30 @@ pub enum FilterMode {
     None,
 }
 
+/// Display implementation.
+impl std::fmt::Display for FilterMode {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Deunicode => write!(f, "deunicode"),
+            Self::Decancer => write!(f, "decancer"),
+            Self::AllNumbers => write!(f, "all-numbers"),
+            Self::AnyNumbers => write!(f, "any-numbers"),
+            Self::NoNumbers => write!(f, "no-numbers"),
+            Self::OnlyNumbers => write!(f, "only-numbers"),
+            Self::AllAscii => write!(f, "all-ascii"),
+            Self::AnyAscii => write!(f, "any-ascii"),
+            Self::NoAscii => write!(f, "no-ascii"),
+            Self::OnlyAscii => write!(f, "only-ascii"),
+            Self::None => write!(f, "none"),
+        }
+    }
+}
+
 impl FilterMode {
     /// Filter the input string with the given mode.
-    pub fn filter_str(&self, s: &str) -> String {
+    pub fn filter_str(&self, s: &mut String) {
         match self {
-            Self::Deunicode => deunicode(s),
+            Self::Deunicode => filter_deunicode(s),
             Self::Decancer => filter_decancer(s),
             Self::AllNumbers => ignore_all_numeric(s),
             Self::AnyNumbers => ignore_any_numeric(s),
@@ -46,90 +65,78 @@ impl FilterMode {
             Self::AnyAscii => ignore_any_ascii(s),
             Self::NoAscii => ignore_no_ascii(s),
             Self::OnlyAscii => keep_only_ascii(s),
-            Self::None => s.to_string(),
-        }
+            //Self::None => s.to_string(),
+            Self::None => {}
+        };
     }
 }
+fn filter_deunicode(s: &mut String) {
+    *s = deunicode(s); // seems to be faster than `s.replace_range(.., &deunicode(s));`
+}
 
-fn filter_decancer(s: &str) -> String {
+fn filter_decancer(s: &mut String) {
     // using macro w/ default options instead of cure function;
     // consider cure options: https://docs.rs/decancer/latest/decancer/struct.Options.html
     let out = decancer::cure!(s);
     match out {
-        Ok(o) => o.to_string(),
-        Err(..) => "".to_string(),
-    }
+        Ok(o) => *s = o.to_string(), // seems to be faster than`s.replace_range(.., &o),`
+        Err(..) => s.clear(),
+    };
 }
 
-fn flag_numeric_chars(s: &str) -> Vec<bool> {
+fn flag_numeric_chars(s: &mut String) -> Vec<bool> {
     s.chars().map(|c| c.is_numeric()).collect()
 }
 
-fn ignore_all_numeric(s: &str) -> String {
-    if flag_numeric_chars(s).contains(&false) {
-        s.to_string()
-    } else {
-        "".to_string()
+fn ignore_all_numeric(s: &mut String) {
+    if !flag_numeric_chars(s).contains(&false) {
+        s.clear();
     }
 }
 
-fn ignore_any_numeric(s: &str) -> String {
+fn ignore_any_numeric(s: &mut String) {
     if flag_numeric_chars(s).contains(&true) {
-        "".to_string()
-    } else {
-        s.to_string()
+        s.clear();
     }
 }
 
-fn ignore_no_numeric(s: &str) -> String {
-    if flag_numeric_chars(s).contains(&true) {
-        s.to_string()
-    } else {
-        "".to_string()
+fn ignore_no_numeric(s: &mut String) {
+    if !flag_numeric_chars(s).contains(&true) {
+        s.clear();
     }
 }
 
-fn keep_only_numeric(s: &str) -> String {
+fn keep_only_numeric(s: &mut String) {
     if flag_numeric_chars(s).contains(&false) {
-        "".to_string()
-    } else {
-        s.to_string()
+        s.clear();
     }
 }
 
-fn flag_ascii_chars(s: &str) -> Vec<bool> {
+fn flag_ascii_chars(s: &mut String) -> Vec<bool> {
     s.chars().map(|c| c.is_ascii()).collect()
 }
 
-fn ignore_all_ascii(s: &str) -> String {
-    if flag_ascii_chars(s).contains(&false) {
-        s.to_string()
-    } else {
-        "".to_string()
+fn ignore_all_ascii(s: &mut String) {
+    if !flag_ascii_chars(s).contains(&false) {
+        s.clear();
     }
 }
 
-fn ignore_any_ascii(s: &str) -> String {
+fn ignore_any_ascii(s: &mut String) {
     if flag_ascii_chars(s).contains(&true) {
-        "".to_string()
-    } else {
-        s.to_string()
+        s.clear();
     }
 }
 
-fn ignore_no_ascii(s: &str) -> String {
-    if flag_ascii_chars(s).contains(&true) {
-        s.to_string()
-    } else {
-        "".to_string()
+fn ignore_no_ascii(s: &mut String) {
+    if !flag_ascii_chars(s).contains(&true) {
+        s.clear()
     }
 }
 
-fn keep_only_ascii(s: &str) -> String {
+fn keep_only_ascii(s: &mut String) {
     if flag_ascii_chars(s).contains(&false) {
-        "".to_string()
-    } else {
-        s.to_string()
+        s.clear();
     }
 }
 
@@ -137,91 +144,84 @@ fn keep_only_ascii(s: &str) -> String {
 mod tests {
     use super::*;
 
-    #[test]
-    fn test_ignore_all_numeric() {
-        assert_eq!(ignore_all_numeric("11"), "".to_string());
-        assert_eq!(ignore_all_numeric("a1"), "a1".to_string());
-        assert_eq!(ignore_all_numeric("ab"), "ab".to_string());
-        assert_eq!(ignore_all_numeric(""), "".to_string());
+    macro_rules! all_filter_tests {
+        ($($name:ident: $value:expr,)*) => {
+        $(
+            #[test]
+            fn $name() {
+                let (func, prov, exp) = $value;
+                let mut p = prov.to_string();
+                let e = exp.to_string();
+                func(&mut p);
+                assert_eq!(p, e);
+            }
+        )*
+        }
     }
 
-    #[test]
-    fn test_ignore_any_numeric() {
-        assert_eq!(ignore_any_numeric("11"), "".to_string());
-        assert_eq!(ignore_any_numeric("a1"), "".to_string());
-        assert_eq!(ignore_any_numeric("ab"), "ab".to_string());
-        assert_eq!(ignore_any_numeric(""), "".to_string());
-    }
+    all_filter_tests! {
+        ignore_all_numeric_0: (ignore_all_numeric, "11", ""),
+        ignore_all_numeric_1: (ignore_all_numeric, "a1", "a1"),
+        ignore_all_numeric_2: (ignore_all_numeric, "ab", "ab"),
+        ignore_all_numeric_3: (ignore_all_numeric, "", ""),
 
-    #[test]
-    fn test_ignore_no_numeric() {
-        assert_eq!(ignore_no_numeric("11"), "11".to_string());
-        assert_eq!(ignore_no_numeric("a1"), "a1".to_string());
-        assert_eq!(ignore_no_numeric("ab"), "".to_string());
-        assert_eq!(ignore_no_numeric(""), "".to_string());
-    }
+        ignore_any_numeric_0: (ignore_any_numeric, "11", ""),
+        ignore_any_numeric_1: (ignore_any_numeric, "a1", ""),
+        ignore_any_numeric_2: (ignore_any_numeric, "ab", "ab"),
+        ignore_any_numeric_3: (ignore_any_numeric, "", ""),
 
-    #[test]
-    fn test_keep_only_numeric() {
-        assert_eq!(keep_only_numeric("11"), "11".to_string());
-        assert_eq!(keep_only_numeric("a1"), "".to_string());
-        assert_eq!(keep_only_numeric("ab"), "".to_string());
-        assert_eq!(keep_only_numeric(""), "".to_string());
-    }
+        ignore_no_numeric_0: (ignore_no_numeric, "11", "11"),
+        ignore_no_numeric_1: (ignore_no_numeric, "a1", "a1"),
+        ignore_no_numeric_2: (ignore_no_numeric, "ab", ""),
+        ignore_no_numeric_3: (ignore_no_numeric, "", ""),
 
-    #[test]
-    fn test_ignore_all_ascii() {
-        assert_eq!(ignore_all_ascii("11"), "".to_string());
-        assert_eq!(ignore_all_ascii("abc"), "".to_string());
-        assert_eq!(ignore_all_ascii("❤❤❤"), "❤❤❤".to_string());
-        assert_eq!(ignore_all_ascii("❤_❤"), "❤_❤".to_string());
-        assert_eq!(ignore_all_ascii("éala"), "éala".to_string());
-        assert_eq!(ignore_all_ascii("ṣallā"), "ṣallā".to_string());
-        assert_eq!(ignore_all_ascii("ジャンタ"), "ジャンタ".to_string());
-        assert_eq!(ignore_all_ascii("українська"), "українська".to_string());
-        assert_eq!(ignore_all_ascii("العربية"), "العربية".to_string());
-        assert_eq!(ignore_all_ascii(""), "".to_string());
-    }
+        keep_only_numeric_0: (keep_only_numeric, "11", "11"),
+        keep_only_numeric_1: (keep_only_numeric, "a1", ""),
+        keep_only_numeric_2: (keep_only_numeric, "ab", ""),
+        keep_only_numeric_3: (keep_only_numeric, "", ""),
 
-    #[test]
-    fn test_ignore_any_ascii() {
-        assert_eq!(ignore_any_ascii("11"), "".to_string());
-        assert_eq!(ignore_any_ascii("abc"), "".to_string());
-        assert_eq!(ignore_any_ascii("❤❤❤"), "❤❤❤".to_string());
-        assert_eq!(ignore_any_ascii("❤_❤"), "".to_string());
-        assert_eq!(ignore_any_ascii("éala"), "".to_string());
-        assert_eq!(ignore_any_ascii("ṣallā"), "".to_string());
-        assert_eq!(ignore_any_ascii("ジャンタ"), "ジャンタ".to_string());
-        assert_eq!(ignore_any_ascii("українська"), "українська".to_string());
-        assert_eq!(ignore_any_ascii("العربية"), "العربية".to_string());
-        assert_eq!(ignore_any_ascii(""), "".to_string());
-    }
+        ignore_all_ascii_0: (ignore_all_ascii, "11", ""),
+        ignore_all_ascii_1: (ignore_all_ascii, "abc", ""),
+        ignore_all_ascii_2: (ignore_all_ascii, "❤❤❤", "❤❤❤"),
+        ignore_all_ascii_3: (ignore_all_ascii, "❤_❤", "❤_❤"),
+        ignore_all_ascii_4: (ignore_all_ascii, "éala", "éala"),
+        ignore_all_ascii_5: (ignore_all_ascii, "ṣallā", "ṣallā"),
+        ignore_all_ascii_6: (ignore_all_ascii, "ジャンタ", "ジャンタ"),
+        ignore_all_ascii_7: (ignore_all_ascii, "українська", "українська"),
+        ignore_all_ascii_8: (ignore_all_ascii, "العربية", "العربية"),
+        ignore_all_ascii_9: (ignore_all_ascii, "", ""),
 
-    #[test]
-    fn test_ignore_no_ascii() {
-        assert_eq!(ignore_no_ascii("11"), "11".to_string());
-        assert_eq!(ignore_no_ascii("abc"), "abc".to_string());
-        assert_eq!(ignore_no_ascii("❤❤❤"), "".to_string());
-        assert_eq!(ignore_no_ascii("❤_❤"), "❤_❤".to_string());
-        assert_eq!(ignore_no_ascii("éala"), "éala".to_string());
-        assert_eq!(ignore_no_ascii("ṣallā"), "ṣallā".to_string());
-        assert_eq!(ignore_no_ascii("ジャンタ"), "".to_string());
-        assert_eq!(ignore_no_ascii("українська"), "".to_string());
-        assert_eq!(ignore_no_ascii("العربية"), "".to_string());
-        assert_eq!(ignore_no_ascii(""), "".to_string());
-    }
+        ignore_any_ascii_0: (ignore_any_ascii, "11", ""),
+        ignore_any_ascii_1: (ignore_any_ascii, "abc", ""),
+        ignore_any_ascii_2: (ignore_any_ascii, "❤❤❤", "❤❤❤"),
+        ignore_any_ascii_3: (ignore_any_ascii, "❤_❤", ""),
+        ignore_any_ascii_4: (ignore_any_ascii, "éala", ""),
+        ignore_any_ascii_5: (ignore_any_ascii, "ṣallā", ""),
+        ignore_any_ascii_6: (ignore_any_ascii, "ジャンタ", "ジャンタ"),
+        ignore_any_ascii_7: (ignore_any_ascii, "українська", "українська"),
+        ignore_any_ascii_8: (ignore_any_ascii, "العربية", "العربية"),
+        ignore_any_ascii_9: (ignore_any_ascii, "", ""),
 
-    #[test]
-    fn test_keep_only_ascii() {
-        assert_eq!(keep_only_ascii("11"), "11".to_string());
-        assert_eq!(keep_only_ascii("abc"), "abc".to_string());
-        assert_eq!(keep_only_ascii("❤❤❤"), "".to_string());
-        assert_eq!(keep_only_ascii("❤_❤"), "".to_string());
-        assert_eq!(keep_only_ascii("éala"), "".to_string());
-        assert_eq!(keep_only_ascii("ṣallā"), "".to_string());
-        assert_eq!(keep_only_ascii("ジャンタ"), "".to_string());
-        assert_eq!(keep_only_ascii("українська"), "".to_string());
-        assert_eq!(keep_only_ascii("العربية"), "".to_string());
-        assert_eq!(keep_only_ascii(""), "".to_string());
+        ignore_no_ascii_0: (ignore_no_ascii, "11", "11"),
+        ignore_no_ascii_1: (ignore_no_ascii, "abc", "abc"),
+        ignore_no_ascii_2: (ignore_no_ascii, "❤❤❤", ""),
+        ignore_no_ascii_3: (ignore_no_ascii, "❤_❤", "❤_❤"),
+        ignore_no_ascii_4: (ignore_no_ascii, "éala", "éala"),
+        ignore_no_ascii_5: (ignore_no_ascii, "ṣallā", "ṣallā"),
+        ignore_no_ascii_6: (ignore_no_ascii, "ジャンタ", ""),
+        ignore_no_ascii_7: (ignore_no_ascii, "українська", ""),
+        ignore_no_ascii_8: (ignore_no_ascii, "العربية", ""),
+        ignore_no_ascii_9: (ignore_no_ascii, "", ""),
+
+        keep_only_ascii_0: (keep_only_ascii, "11", "11"),
+        keep_only_ascii_1: (keep_only_ascii, "abc", "abc"),
+        keep_only_ascii_2: (keep_only_ascii, "❤❤❤", ""),
+        keep_only_ascii_3: (keep_only_ascii, "❤_❤", ""),
+        keep_only_ascii_4: (keep_only_ascii, "éala", ""),
+        keep_only_ascii_5: (keep_only_ascii, "ṣallā", ""),
+        keep_only_ascii_6: (keep_only_ascii, "ジャンタ", ""),
+        keep_only_ascii_7: (keep_only_ascii, "українська", ""),
+        keep_only_ascii_8: (keep_only_ascii, "العربية", ""),
+        keep_only_ascii_9: (keep_only_ascii, "", ""),
     }
 }

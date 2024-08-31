@@ -1,3 +1,4 @@
+use bytes::Bytes;
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
@@ -79,7 +80,9 @@ impl Crawler {
         Ok(crawler)
     }
 
-    /// Crawl urls up to a given limit, scraping urls and words from pages;
+    /// Crawl urls up to a given limit, extracting words from documents;
+    /// in web mode, links are extracted from web pages to spider;
+    /// in local mode, the directory structure is traversed to find documents;
     /// returns the maximum depth reached upon success.
     pub async fn crawl(&mut self) -> Result<usize, Error> {
         let semaphore = Arc::new(Semaphore::new(self.opts.limit_concurrent()));
@@ -89,10 +92,10 @@ impl Crawler {
                 self.urldb.stage_unvisited_urls();
             }
             if self.urldb.num_staged_urls() < 1 {
-                println!("candidate urls exhausted...");
+                eprintln!("candidate urls exhausted...");
                 break;
             }
-            println!("crawling at depth {}", self.cur_depth);
+            eprintln!("crawling at depth {}", self.cur_depth);
             let mut jhs = VecDeque::new();
             for url_str in self.urldb.staged_urls_iter() {
                 if self.observe_limit().await {
@@ -105,7 +108,7 @@ impl Crawler {
                 let jh = tokio::spawn(async move {
                     let permit = sem.acquire().await.unwrap();
                     spider.crawl_url(&url_str).await;
-                    e.poll_queue().await;
+                    e.process_doc_from_queue().await;
                     drop(permit);
                 });
                 jhs.push_back(jh);
@@ -125,6 +128,7 @@ impl Crawler {
             self.cur_depth += 1;
         }
 
+        // push a final None to signal completion
         self.docs.push(None);
         Ok(self.cur_depth)
     }
@@ -223,7 +227,7 @@ impl Spider {
         let path = url.to_file_path().unwrap();
         let display = path.display();
 
-        println!("visiting {}", display);
+        eprintln!("visiting {}", display);
         let meta_res = fs::metadata(&path);
         if let Err(e) = meta_res {
             self.urldb.mark_errored(url.to_string());
@@ -254,15 +258,15 @@ impl Spider {
         }
 
         let mut file = file_res.unwrap();
-        let mut s = String::new();
-        match file.read_to_string(&mut s) {
+        let mut buf = Vec::new();
+        match file.read_to_end(&mut buf) {
             Err(e) => {
                 self.urldb.mark_errored(url.to_string());
                 eprintln!("error reading file {}: {}", display, e);
             }
             Ok(_) => {
                 self.urldb.mark_visited(url.to_string());
-                self.docs.push(Some(s));
+                self.docs.push(Some(Bytes::from(buf)));
             }
         }
     }
@@ -305,7 +309,7 @@ impl Spider {
 
     async fn crawl_web(&mut self, url: &Url) {
         if !self.matches_site_policy(&url) {
-            println!(
+            eprintln!(
                 "site policy '{}' violated for url: '{}', skipping...",
                 self.opts.site(),
                 url.as_str()
@@ -314,16 +318,19 @@ impl Spider {
             return;
         }
 
-        println!("visiting {}", url.as_str());
+        eprintln!("visiting {}", url.as_str());
         let document = self.doc_from_url(&url.as_str().to_string()).await;
         match document {
             Ok(doc) => {
+                let doc_string = String::from_utf8_lossy(&doc).to_string();
                 self.urldb.mark_visited(url.to_string());
-                self.urls_from_doc(&url, &doc);
+                self.urls_from_doc(&url, &doc_string);
                 self.docs.push(Some(doc));
             }
             Err(e) => match e {
                 Error::EarlyTerminationError => {
+                    // empty on purpose for now;
+                    //
                     //self.urldb.mark_unvisited(url.to_string());
                     //eprintln!("terminated while fetching: {}", url.as_str());
                 }
@@ -341,7 +348,7 @@ impl Spider {
     }
 
     /// Get an html document from the provided url.
-    async fn doc_from_url(&mut self, url: &String) -> Result<String, Error> {
+    async fn doc_from_url(&mut self, url: &String) -> Result<Bytes, Error> {
         tokio::select! {
             response = self.client.get(url).send() => { Self::handle_response(response).await }
             _ = self.shutdown.recv() => { Err(Error::EarlyTerminationError) }
@@ -350,7 +357,7 @@ impl Spider {
 
     async fn handle_response(
         response: Result<reqwest::Response, reqwest::Error>,
-    ) -> Result<String, Error> {
+    ) -> Result<Bytes, Error> {
         match response {
             Err(e) => {
                 if e.is_status() {
@@ -358,10 +365,10 @@ impl Spider {
                         match status_code.as_u16() {
                             429 => {
                                 // breadcrumbs? https://github.com/rust-lang-nursery/rust-cookbook/pull/395/files
-                                println!("wait and retry on 429 not implemented, skipping...");
+                                eprintln!("wait and retry on 429 not implemented, skipping...");
                             }
                             _ => {
-                                println!("unexpected status code: {}", status_code);
+                                eprintln!("unexpected status code: {}", status_code);
                             }
                         }
                     } else {
@@ -372,7 +379,16 @@ impl Spider {
                 }
                 Err(Error::RequestError { why: e })
             }
-            Ok(res) => Ok(res.text().await.unwrap()),
+            Ok(res) => {
+                let r = res.bytes().await;
+                match r {
+                    Err(e) => {
+                        eprintln!("error reading request response: {}", e);
+                        Err(Error::RequestError { why: e })
+                    }
+                    Ok(ress) => Ok(ress),
+                }
+            }
         }
     }
 

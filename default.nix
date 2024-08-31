@@ -17,6 +17,8 @@ let
   optionalItems = cond: items: if cond then items else [ ];
 in
 naersk.lib."${targetPlatform.system}".buildPackage {
+  pname = cargoToml.package.name;
+  version = cargoToml.package.version;
   src = ./.;
 
   buildInputs = [
@@ -26,7 +28,10 @@ naersk.lib."${targetPlatform.system}".buildPackage {
     pkg-config
     libiconv
     openssl
-  ] ++ (optionalItems (system == "aarch64-darwin") [ darwin.apple_sdk.frameworks.SystemConfiguration ]);
+  ] ++ (optionalItems (system == "aarch64-darwin") [
+    darwin.apple_sdk.frameworks.SystemConfiguration
+  ]);
+
   checkInputs = [
     cargo
     rustc
@@ -45,9 +50,6 @@ naersk.lib."${targetPlatform.system}".buildPackage {
   # If you depend on protobuf:
   # PROTOC = "${protobuf}/bin/protoc";
   # PROTOC_INCLUDE = "${protobuf}/include";
-
-  name = cargoToml.package.name;
-  version = cargoToml.package.version;
 
   meta = with lib; {
     description = cargoToml.package.description;

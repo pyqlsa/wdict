@@ -215,7 +215,13 @@ impl FilterArg {
 
     /// Convert a Vector of FilterArg to a Vector of FilterMode.
     pub fn to_modes(v: &Vec<Self>) -> Vec<FilterMode> {
-        v.iter().map(|f| f.to_mode()).collect()
+        // drop None filter as it does nothing anyways
+        v.iter()
+            .filter_map(|f| match f {
+                Self::None => None,
+                _ => Some(f.to_mode()),
+            })
+            .collect()
     }
 }
 
