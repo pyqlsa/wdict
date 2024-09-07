@@ -1,4 +1,5 @@
 use clap::{Args, Parser, ValueEnum};
+use clap_verbosity_flag::ErrorLevel;
 use serde::de::{Deserialize, Deserializer};
 use serde::ser::{Serialize, Serializer};
 
@@ -58,6 +59,9 @@ pub struct Cli {
     /// File to write state, json formatted (will be overwritten if it already exists).
     #[arg(long, default_value = "state-wdict.json", value_parser = helpers::str_not_whitespace_parser())]
     pub state_file: String,
+    /// Control verbosity of logging.
+    #[command(flatten)]
+    pub verbose: clap_verbosity_flag::Verbosity<ErrorLevel>,
 }
 
 #[derive(Args, Debug, Clone)]

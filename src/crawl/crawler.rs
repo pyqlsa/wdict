@@ -1,4 +1,6 @@
 use bytes::Bytes;
+use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
+use log::{debug, info, trace, warn};
 use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
@@ -8,7 +10,7 @@ use std::{fs, io::Read};
 use tokio::sync::Semaphore;
 use tokio::time::{sleep, Duration};
 
-use crate::collections::{DocQueue, UrlDb};
+use crate::collections::UrlDb;
 use crate::error::Error;
 use crate::extract::Extractor;
 use crate::shutdown::Shutdown;
@@ -20,11 +22,11 @@ use super::SitePolicy;
 pub struct Crawler {
     client: Client,
     opts: CrawlOptions,
-    docs: DocQueue,
     urldb: UrlDb,
     cur_depth: usize,
     limiter: Ratelimiter,
     extractor: Extractor,
+    multiprog: MultiProgress,
     /// Listen for shutdown notifications.
     ///
     /// A wrapper around the `broadcast::Receiver` to be paired with a sender.
@@ -35,26 +37,26 @@ impl Crawler {
     /// Returns a new Crawler instance with the default `reqwest::Client`.
     pub fn new(
         opts: CrawlOptions,
-        docs: DocQueue,
         urldb: UrlDb,
         extractor: Extractor,
         shutdown: Shutdown,
+        multiprog: MultiProgress,
     ) -> Result<Self, Error> {
         let client = Client::builder()
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
             .build()?;
-        Self::new_with_client(client, opts, docs, urldb, extractor, shutdown)
+        Self::new_with_client(client, opts, urldb, extractor, shutdown, multiprog)
     }
 
     /// Returns a new Crawler instance with the provided `reqwest::Client`.
     pub fn new_with_client(
         client: Client,
         opts: CrawlOptions,
-        docs: DocQueue,
         urldb: UrlDb,
         extractor: Extractor,
         shutdown: Shutdown,
+        multiprog: MultiProgress,
     ) -> Result<Self, Error> {
         let tokens = if opts.requests_per_second() < 1 {
             1
@@ -68,13 +70,13 @@ impl Crawler {
         let start_url = opts.url.clone();
         let mut crawler = Self {
             opts,
-            docs,
             urldb,
             cur_depth: 0,
             client,
             limiter,
             extractor,
             shutdown,
+            multiprog,
         };
         crawler.urldb.cond_mark_unvisited(String::from(start_url));
         Ok(crawler)
@@ -92,10 +94,11 @@ impl Crawler {
                 self.urldb.stage_unvisited_urls();
             }
             if self.urldb.num_staged_urls() < 1 {
-                eprintln!("candidate urls exhausted...");
+                info!("candidate urls exhausted...");
                 break;
             }
-            eprintln!("crawling at depth {}", self.cur_depth);
+            info!("crawling at depth {}", self.cur_depth);
+            let pb = self.new_staged_progress();
             let mut jhs = VecDeque::new();
             for url_str in self.urldb.staged_urls_iter() {
                 if self.observe_limit().await {
@@ -105,10 +108,13 @@ impl Crawler {
                 let mut spider = self.build_spider();
                 let mut e = self.extractor.clone();
                 let sem = semaphore.clone();
+                let pbc = pb.clone();
                 let jh = tokio::spawn(async move {
                     let permit = sem.acquire().await.unwrap();
-                    spider.crawl_url(&url_str).await;
-                    e.process_doc_from_queue().await;
+                    if let Some(doc) = spider.crawl_url(&url_str).await {
+                        e.words_from_doc(&doc);
+                    }
+                    pbc.inc(1);
                     drop(permit);
                 });
                 jhs.push_back(jh);
@@ -123,13 +129,15 @@ impl Crawler {
             // outer shutdown check before depth step, as we may have been
             // shutdown before completing current depth
             if self.shutdown.is_shutdown() {
+                pb.abandon_with_message("shutdown early...");
+                self.multiprog.remove(&pb);
                 break;
             }
             self.cur_depth += 1;
+            pb.finish();
+            self.multiprog.remove(&pb);
         }
 
-        // push a final None to signal completion
-        self.docs.push(None);
         Ok(self.cur_depth)
     }
 
@@ -156,7 +164,6 @@ impl Crawler {
         Spider::new(
             self.client.clone(),
             self.opts.clone(),
-            self.docs.clone(),
             self.urldb.clone(),
             self.shutdown.clone(),
         )
@@ -166,6 +173,81 @@ impl Crawler {
     pub fn set_depth(&mut self, d: usize) {
         self.cur_depth = d;
     }
+
+    /// Returns a new progress bar to track urls in the next stage;
+    /// if we have too many urls for some reason, returns a spinner.
+    fn new_staged_progress(&self) -> ProgressBar {
+        let pb = if let Ok(size) = self.urldb.num_staged_urls().try_into() {
+            let bar = styled_progress(size);
+            self.multiprog.add(bar)
+        } else {
+            let bar = styled_spinner();
+            self.multiprog.add(bar)
+        };
+        pb.set_prefix(format!("crawl depth: {}", self.cur_depth));
+        pb
+    }
+}
+
+fn styled_progress(size: u64) -> ProgressBar {
+    // light - ░
+    // medium - ▒
+    // dark - ▓
+    // solid - █
+    let bar = ProgressBar::new(size);
+    // deliberate 2 spaces at the end of the template string
+    bar.set_style(
+        ProgressStyle::with_template("[{prefix:.cyan}] |{wide_bar}| {pos:.blue}/{len:.blue}  ")
+            .unwrap()
+            .progress_chars("▓░"), // dark/light
+    );
+    bar
+}
+
+fn styled_spinner() -> ProgressBar {
+    let bar = ProgressBar::new_spinner();
+    bar.set_style(
+        ProgressStyle::with_template("[{prefix:.cyan}] |{spinner}|")
+            .unwrap()
+            .tick_strings(&[
+                "░░░░░░░░░░░░░░░░░░░░",
+                "░░░░░░░░░░░░░░░░░░░░",
+                "▓░░░░░░░░░░░░░░░░░░░",
+                "▓▓░░░░░░░░░░░░░░░░░░",
+                "▓▓▓░░░░░░░░░░░░░░░░░",
+                "▓▓▓▓░░░░░░░░░░░░░░░░",
+                "▓▓▓▓▓░░░░░░░░░░░░░░░",
+                "▓▓▓▓▓▓░░░░░░░░░░░░░░",
+                "▓▓▓▓▓▓▓░░░░░░░░░░░░░",
+                "▓▓▓▓▓▓▓▓░░░░░░░░░░░░",
+                "▓▓▓▓▓▓▓▓▓░░░░░░░░░░░",
+                "▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░",
+                "░▓▓▓▓▓▓▓▓▓▓░░░░░░░░░",
+                "░░▓▓▓▓▓▓▓▓▓▓░░░░░░░░",
+                "░░░▓▓▓▓▓▓▓▓▓▓░░░░░░░",
+                "░░░░▓▓▓▓▓▓▓▓▓▓░░░░░░",
+                "░░░░░▓▓▓▓▓▓▓▓▓▓░░░░░",
+                "░░░░░░▓▓▓▓▓▓▓▓▓▓░░░░",
+                "░░░░░░░▓▓▓▓▓▓▓▓▓▓░░░",
+                "░░░░░░░░▓▓▓▓▓▓▓▓▓▓░░",
+                "░░░░░░░░░▓▓▓▓▓▓▓▓▓▓░",
+                "░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓",
+                "░░░░░░░░░░░▓▓▓▓▓▓▓▓▓",
+                "░░░░░░░░░░░░▓▓▓▓▓▓▓▓",
+                "░░░░░░░░░░░░░▓▓▓▓▓▓▓",
+                "░░░░░░░░░░░░░░▓▓▓▓▓▓",
+                "░░░░░░░░░░░░░░░▓▓▓▓▓",
+                "░░░░░░░░░░░░░░░░▓▓▓▓",
+                "░░░░░░░░░░░░░░░░░▓▓▓",
+                "░░░░░░░░░░░░░░░░░░▓▓",
+                "░░░░░░░░░░░░░░░░░░░▓",
+                "░░░░░░░░░░░░░░░░░░░░",
+                "░░░░░░░░░░░░░░░░░░░░",
+                "░░░░░░░░░░░░░░░░░░░░",
+            ]),
+    );
+    bar.enable_steady_tick(Duration::from_millis(100));
+    bar
 }
 
 /// Crawls websites, gathering urls from pages.
@@ -173,7 +255,6 @@ impl Crawler {
 struct Spider {
     client: Client,
     opts: CrawlOptions,
-    docs: DocQueue,
     urldb: UrlDb,
     /// Listen for shutdown notifications.
     ///
@@ -183,37 +264,30 @@ struct Spider {
 
 impl Spider {
     /// Returns a new Spider instance with the provided `reqwest::Client`.
-    pub fn new(
-        client: Client,
-        opts: CrawlOptions,
-        docs: DocQueue,
-        urldb: UrlDb,
-        shutdown: Shutdown,
-    ) -> Self {
+    pub fn new(client: Client, opts: CrawlOptions, urldb: UrlDb, shutdown: Shutdown) -> Self {
         Self {
             opts,
-            docs,
             urldb,
             client,
             shutdown,
         }
     }
 
-    async fn crawl_url(&mut self, url_str: &String) {
+    async fn crawl_url(&mut self, url_str: &String) -> Option<Bytes> {
         // give us a chance to receive graceful shutdown signal
         tokio::select! {
           _ = sleep(Duration::from_millis(u64::from(utils::num_between(20, 120)))) => {}
           _ = self.shutdown.recv() => {}
         }
         if self.shutdown.is_shutdown() {
-            return;
+            return None;
         }
 
         let result = Url::parse(url_str.as_str());
         if let Err(e) = result {
-            eprintln!("not a url: {}", e);
+            debug!("not a url: {}", e);
             self.urldb.mark_errored(url_str.clone());
-            return;
+            return None;
         }
         let url = result.unwrap();
 
@@ -223,38 +297,39 @@ impl Spider {
         }
     }
 
-    async fn crawl_local(&mut self, url: &Url) {
+    async fn crawl_local(&mut self, url: &Url) -> Option<Bytes> {
         let path = url.to_file_path().unwrap();
         let display = path.display();
 
-        eprintln!("visiting {}", display);
+        trace!("visiting {}", display);
         let meta_res = fs::metadata(&path);
         if let Err(e) = meta_res {
             self.urldb.mark_errored(url.to_string());
-            eprintln!("error getting path metadata {}: {}", display, e);
-            return;
+            warn!("error getting path metadata {}: {}", display, e);
+            return None;
         }
 
         let meta = meta_res.unwrap();
         if meta.is_file() {
-            self.handle_local_file(&url);
+            self.handle_local_file(&url)
         } else if meta.is_dir() {
             self.handle_local_dir(&url);
+            None
         } else {
             // ¯\_(ツ)_/¯
-            return;
+            None
         }
     }
 
-    fn handle_local_file(&mut self, url: &Url) {
+    fn handle_local_file(&mut self, url: &Url) -> Option<Bytes> {
         let path = url.to_file_path().unwrap();
         let display = path.display();
 
         let file_res = fs::File::open(&path);
         if let Err(e) = file_res {
             self.urldb.mark_errored(url.to_string());
-            eprintln!("error opening file {}: {}", display, e);
-            return;
+            warn!("error opening file {}: {}", display, e);
+            return None;
         }
 
         let mut file = file_res.unwrap();
@@ -262,23 +337,24 @@ impl Spider {
         match file.read_to_end(&mut buf) {
             Err(e) => {
                 self.urldb.mark_errored(url.to_string());
-                eprintln!("error reading file {}: {}", display, e);
+                warn!("error reading file {}: {}", display, e);
+                None
             }
             Ok(_) => {
                 self.urldb.mark_visited(url.to_string());
-                self.docs.push(Some(Bytes::from(buf)));
+                Some(Bytes::from(buf))
             }
         }
     }
 
-    fn handle_local_dir(&mut self, url: &Url) {
+    fn handle_local_dir(&mut self, url: &Url) -> () {
         let path = url.to_file_path().unwrap();
         let display = path.display();
 
         let paths_res = fs::read_dir(&path);
         if let Err(e) = paths_res {
             self.urldb.mark_errored(url.to_string());
-            eprintln!("error reading directory {}: {}", display, e);
+            warn!("error reading directory {}: {}", display, e);
             return;
         }
         let paths = paths_res.unwrap();
@@ -286,7 +362,7 @@ impl Spider {
             match pr {
                 Err(e) => {
                     //self.urldb.mark_errored(url.to_string());
-                    eprintln!("error reading directory contents {}: {}", display, e);
+                    warn!("error reading directory contents {}: {}", display, e);
                     continue;
                 }
                 Ok(p) => {
@@ -294,7 +370,7 @@ impl Spider {
                     let res = utils::url_from_path_str(child.as_str());
                     match res {
                         Err(_) => {
-                            eprintln!("error parsing path as url: {}", child);
+                            warn!("error parsing path as url: {}", child);
                             continue;
                         }
                         Ok(u) => {
@@ -307,36 +383,38 @@ impl Spider {
         }
     }
 
-    async fn crawl_web(&mut self, url: &Url) {
+    async fn crawl_web(&mut self, url: &Url) -> Option<Bytes> {
         if !self.matches_site_policy(&url) {
-            eprintln!(
+            debug!(
                 "site policy '{}' violated for url: '{}', skipping...",
                 self.opts.site(),
                 url.as_str()
             );
             self.urldb.mark_skipped(url.as_str().to_string());
-            return;
+            return None;
         }
 
-        eprintln!("visiting {}", url.as_str());
+        trace!("visiting {}", url.as_str());
         let document = self.doc_from_url(&url.as_str().to_string()).await;
         match document {
             Ok(doc) => {
                 let doc_string = String::from_utf8_lossy(&doc).to_string();
                 self.urldb.mark_visited(url.to_string());
                 self.urls_from_doc(&url, &doc_string);
-                self.docs.push(Some(doc));
+                Some(doc)
             }
             Err(e) => match e {
                 Error::EarlyTerminationError => {
                     // empty on purpose for now;
                     //
                     //self.urldb.mark_unvisited(url.to_string());
-                    //eprintln!("terminated while fetching: {}", url.as_str());
+                    //debug!("terminated while fetching: {}", url.as_str());
+                    None
                 }
                 _ => {
                     self.urldb.mark_errored(url.to_string());
-                    eprintln!("error fetching page {}: {}", url.as_str(), e);
+                    warn!("error fetching page {}: {}", url.as_str(), e);
+                    None
                 }
             },
         }
@@ -365,17 +443,17 @@ impl Spider {
                         match status_code.as_u16() {
                             429 => {
                                 // breadcrumbs? https://github.com/rust-lang-nursery/rust-cookbook/pull/395/files
-                                eprintln!("wait and retry on 429 not implemented, skipping...");
+                                debug!("wait and retry on 429 not implemented, skipping...");
                             }
                             _ => {
-                                eprintln!("unexpected status code: {}", status_code);
+                                debug!("unexpected status code: {}", status_code);
                             }
                         }
                     } else {
-                        eprintln!("expected error with status code, but found none: {}", e);
+                        debug!("expected error with status code, but found none: {}", e);
                     }
                 } else {
-                    eprintln!("unexpected error: {}", e);
+                    debug!("unexpected error: {}", e);
                 }
                 Err(Error::RequestError { why: e })
             }
@@ -383,7 +461,7 @@ impl Spider {
                 let r = res.bytes().await;
                 match r {
                     Err(e) => {
-                        eprintln!("error reading request response: {}", e);
+                        debug!("error reading request response: {}", e);
                         Err(Error::RequestError { why: e })
                     }
                     Ok(ress) => Ok(ress),
@@ -566,7 +644,8 @@ impl std::fmt::Display for CrawlMode {
 impl PartialEq for CrawlMode {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Web, Self::Web) | (Self::Local, Self::Local) => true,
+            (Self::Web, Self::Web) => true,
+            (Self::Local, Self::Local) => true,
             _ => false,
         }
     }

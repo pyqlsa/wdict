@@ -1,9 +1,10 @@
 use bytes::Bytes;
 use infer;
+use log::debug;
 use scraper::{node::Node, Html};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::collections::{DocQueue, WordDb};
+use crate::collections::WordDb;
 
 use super::FilterMode;
 
@@ -11,36 +12,24 @@ use super::FilterMode;
 #[derive(Debug, Clone)]
 pub struct Extractor {
     opts: ExtractOptions,
-    docs: DocQueue,
     words: WordDb,
 }
 
 impl Extractor {
     /// Returns a new Extractor instance.
-    pub fn new(opts: ExtractOptions, docs: DocQueue, words: WordDb) -> Self {
-        Self { opts, docs, words }
+    pub fn new(opts: ExtractOptions, words: WordDb) -> Self {
+        Self { opts, words }
     }
 
-    /// Parse documents from the internal queue and extract words.
-    pub async fn process_doc_from_queue(&mut self) -> () {
-        //sleep(Duration::from_millis(u64::from(utils::num_between(10, 30)))).await;
-        if self.docs.is_empty() {
-            return;
-        }
-        if let Some(buf) = self.docs.pop() {
-            self.words_from_doc(&buf);
-        }
-    }
-
-    fn words_from_doc(&mut self, buf: &Bytes) -> () {
+    pub fn words_from_doc(&mut self, buf: &Bytes) -> () {
         let res = infer::get(buf);
         match res {
             Some(kind) => match kind.mime_type() {
                 "text/html" => self.words_from_html(&buf),
-                _ => eprintln!("unsupported mime type: {}", kind),
+                _ => debug!("unsupported mime type: {}", kind),
             },
             None => {
-                //eprintln!("failure infering mime type");
+                //warn!("failure infering mime type");
                 // attempt as plain text file
                 self.words_from_text(&buf);
             }

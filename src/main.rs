@@ -1,6 +1,9 @@
 //! Simple cli tool to extract words from webpages to build a dictionary.
 //!
 use clap::Parser;
+use indicatif::MultiProgress;
+use indicatif_log_bridge::LogWrapper;
+use log::{error, info, LevelFilter};
 use serde_json;
 use std::io::Write;
 use std::{fs, process::exit};
@@ -9,7 +12,7 @@ use tokio::sync::broadcast;
 use tokio::task::JoinHandle;
 
 use wdict::cli::{self, Cli, FilterArg, State};
-use wdict::collections::{DocQueue, UrlDb, WordDb};
+use wdict::collections::{UrlDb, WordDb};
 use wdict::crawl::{CrawlMode, CrawlOptions, Crawler};
 use wdict::extract::{ExtractOptions, Extractor};
 use wdict::{Error, Shutdown};
@@ -19,12 +22,15 @@ use wdict::{Error, Shutdown};
 async fn main() -> Result<(), Error> {
     let mut args = Cli::parse();
 
+    let filter = args.verbose.log_level_filter();
+    let multi = MultiProgress::new();
+    setup_logger(multi.clone(), &filter);
+
     if args.target.resume || args.target.resume_strict {
-        eprintln!(
+        info!(
             "resuming from state '{}' and dictionary '{}'",
             args.state_file, args.output
         );
-        eprintln!();
     }
 
     let state_res = cli::parse_state(&args);
@@ -57,12 +63,11 @@ async fn main() -> Result<(), Error> {
         args.filters = in_state.filters.drain(0..).collect();
     }
 
-    eprintln!(
+    info!(
         "using '{}' as target with crawl mode: {}",
         &url.as_str(),
         crawl_mode
     );
-    eprintln!();
 
     let (notify_shutdown, _) = broadcast::channel(1);
     let copts = CrawlOptions::new(
@@ -83,9 +88,6 @@ async fn main() -> Result<(), Error> {
         FilterArg::to_modes(&args.filters),
     );
 
-    let queue: DocQueue = DocQueue::new();
-    let (q1, q2) = (queue.clone(), queue.clone());
-
     let urldb: UrlDb = UrlDb::new();
     let mut u = urldb.clone();
     cli::fill_urldb_from_state(&mut u, &mut in_state); // resume
@@ -96,16 +98,21 @@ async fn main() -> Result<(), Error> {
         cli::fill_worddb_from_file(&mut w, &args.output);
     }
 
-    let e = Extractor::new(eopts, q2, w);
-    let mut crawler = Crawler::new(copts, q1, u, e, Shutdown::new(notify_shutdown.subscribe()))?;
+    let e = Extractor::new(eopts, w);
+    let mut crawler = Crawler::new(
+        copts,
+        u,
+        e,
+        Shutdown::new(notify_shutdown.subscribe()),
+        multi.clone(),
+    )?;
     crawler.set_depth(in_state.depth_reached); // resume
 
     let crawl_handle = tokio::spawn(async move { crawler.crawl().await });
     let sig_handle = tokio::spawn(async move {
         tokio::select! {
             _ = signal::ctrl_c() => {
-                eprintln!();
-                eprintln!("shutting down...");
+                info!("shutting down...");
                 // When `notify_shutdown` is dropped, all tasks which have `subscribe`d will
                 // receive the shutdown signal and can exit
                 drop(notify_shutdown);
@@ -123,10 +130,10 @@ async fn main() -> Result<(), Error> {
 
     let len_urls = urldb.num_visited_urls();
     let len_words = words.len();
-    eprintln!();
-    eprintln!("reached depth: {}", depth_reached);
-    eprintln!("unique words: {}", len_words);
-    eprintln!("visited urls: {}", len_urls);
+    info!(
+        "reached depth: {}; unique words {}; visited urls: {}",
+        depth_reached, len_words, len_urls
+    );
 
     let mut file = fs::File::create(args.output.clone()).expect("Error creating dictionary file");
     let mut contents = String::new();
@@ -136,7 +143,7 @@ async fn main() -> Result<(), Error> {
     });
     file.write_all(contents.as_bytes())
         .expect("Error writing to dictionary");
-    eprintln!("dictionary written to: {}", args.output);
+    info!("dictionary written to: {}", args.output);
 
     if args.output_state {
         let out_state = State {
@@ -162,14 +169,26 @@ async fn main() -> Result<(), Error> {
             let mut file = fs::File::create(url_file.clone()).expect("Error creating state file");
             file.write_all(j.as_bytes())
                 .expect("Error writing state to file");
-            eprintln!("state written to file: {}", url_file);
+            info!("state written to file: {}", url_file);
         } else {
-            eprintln!("Error serializing output state json")
+            error!("Error serializing output state json")
         }
     }
-    eprintln!();
 
     Ok(())
+}
+
+fn setup_logger(m: MultiProgress, f: &LevelFilter) -> () {
+    let filter_str = format!("none,wdict={}", f.as_str());
+    let logenv = env_logger::Env::default().default_filter_or(filter_str);
+    let logger = env_logger::Builder::from_env(logenv).build();
+    let level = logger.filter();
+
+    if let Err(e) = LogWrapper::new(m, logger).try_init() {
+        eprintln!("failed setting up logger: {}", e);
+        exit(1);
+    }
+    log::set_max_level(level);
 }
 
 /// Wait for crawl thread handle to complete; retrned the max depth_reached
@@ -181,12 +200,12 @@ async fn wait_for_crawl(h: JoinHandle<Result<usize, Error>>) -> usize {
     match r1 {
         Ok(res) => match res {
             Err(err) => {
-                eprintln!("unexpected error while crawling {}", err);
+                error!("unexpected error while crawling {}", err);
             }
             Ok(i) => depth_reached = i,
         },
         Err(err) => {
-            eprintln!("unexpected error while joining threads {}", err);
+            error!("unexpected error while joining threads {}", err);
         }
     }
     depth_reached

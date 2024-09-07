@@ -2,7 +2,7 @@
 name = "wdict"
 authors = ["pyqlsa"]
 description = "Create dictionaries by scraping webpages or crawling local files."
-version = "0.1.17"
+version = "0.1.18"
 edition = "2021"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
@@ -12,16 +12,21 @@ include = ["src/**/*.rs", "Cargo.toml", "Cargo.lock"]
 
 [dependencies]
 bytes = { version = "1.7.1" }
-clap = { version = "4.5.16", features = ["derive"] }
+clap = { version = "4.5.17", features = ["derive"] }
+clap-verbosity-flag = { version = "2.2.1" }
 decancer = { version = "3.2.4" }
 deunicode = { version = "1.6.0" }
+env_logger = { version = "0.11.5" }
+indicatif = { version = "0.17.8" }
+indicatif-log-bridge = { version = "0.2.3" }
 infer = { version = "0.16.0" }
+log = { version = "0.4.22" }
 psl = { version = "2.1.55" }
 ratelimit = { version = "0.9.1" }
 reqwest = { version = "0.12.7" }
 scraper = { version = "0.20.0" }
-serde = { version = "1.0.209", features = ["derive"] }
-serde_json = { version = "1.0.127" }
+serde = { version = "1.0.210", features = ["derive"] }
+serde_json = { version = "1.0.128" }
 tokio = { version = "1.40.0", features = ["full"] }
 unicode-segmentation = { version = "1.11.0" }
 url = { version = "2.5.2" }

@@ -1,4 +1,5 @@
 use clap::builder::ValueParser;
+use log::warn;
 use reqwest::Url;
 use std::fs;
 use std::io::{self, BufRead};
@@ -77,7 +78,7 @@ pub fn parse_url(url_str: &str) -> Result<Url, ()> {
     let res = Url::parse(url_str);
     match res {
         Err(e) => {
-            eprintln!("error parsing url {}: {}", url_str, e);
+            warn!("error parsing url {}: {}", url_str, e);
             Err(())
         }
         Ok(u) => Ok(u),
@@ -99,7 +100,7 @@ pub fn parse_target(args: &Cli) -> Result<Url, ()> {
         let res = utils::url_from_path_str(&p);
         match res {
             Err(e) => {
-                eprintln!("error parsing path {} as url: {}", p, e);
+                warn!("error parsing path {} as url: {}", p, e);
                 return Err(());
             }
             Ok(u) => {
@@ -116,7 +117,7 @@ pub fn parse_state(args: &Cli) -> Result<State, ()> {
         let state_res = State::new_from_file(args.state_file.as_str());
         match state_res {
             Err(e) => {
-                eprintln!("error extracting state from {}: {}", args.state_file, e);
+                warn!("error extracting state from {}: {}", args.state_file, e);
                 return Err(());
             }
             Ok(s) => {
@@ -162,9 +163,8 @@ pub fn fill_worddb_from_file(db: &mut WordDb, file: &str) {
     let file_res = fs::File::open(file);
     match file_res {
         Err(e) => {
-            eprintln!("failed opening dictionary {}: {}", file, e);
-            eprintln!("...continuing without previous words");
-            eprintln!();
+            warn!("failed opening dictionary {}: {}", file, e);
+            warn!("...continuing without previous words");
             return;
         }
         Ok(f) => {

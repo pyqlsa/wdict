@@ -139,6 +139,12 @@ Options:
 
           [default: state-wdict.json]
 
+  -v, --verbose...
+          Increase logging verbosity
+
+  -q, --quiet...
+          Decrease logging verbosity
+
   -h, --help
           Print help (see a summary with '-h')
 

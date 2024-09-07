@@ -227,11 +227,11 @@ enum Status {
 impl PartialEq for Status {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
-            (Self::Visited, Self::Visited)
-            | (Self::Staged, Self::Staged)
-            | (Self::Unvisited, Self::Unvisited)
-            | (Self::Skip, Self::Skip)
-            | (Self::Error, Self::Error) => true,
+            (Self::Visited, Self::Visited) => true,
+            (Self::Staged, Self::Staged) => true,
+            (Self::Unvisited, Self::Unvisited) => true,
+            (Self::Skip, Self::Skip) => true,
+            (Self::Error, Self::Error) => true,
             _ => false,
         }
     }

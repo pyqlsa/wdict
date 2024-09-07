@@ -144,7 +144,7 @@ fn keep_only_ascii(s: &mut String) {
 mod tests {
     use super::*;
 
-    macro_rules! all_filter_tests {
+    macro_rules! filter_tests {
         ($($name:ident: $value:expr,)*) => {
         $(
             #[test]
@@ -159,7 +159,7 @@ mod tests {
         }
     }
 
-    all_filter_tests! {
+    filter_tests! {
         ignore_all_numeric_0: (ignore_all_numeric, "11", ""),
         ignore_all_numeric_1: (ignore_all_numeric, "a1", "a1"),
         ignore_all_numeric_2: (ignore_all_numeric, "ab", "ab"),

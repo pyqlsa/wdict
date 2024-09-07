@@ -16,8 +16,8 @@ target/
 # nix build result
 result
 
-# default dictionary file
-wdict.txt
+# dictionary file extension
+*.txt
 
-# default state file
-state-wdict.json
+# state file extension
+*.json
