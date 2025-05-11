@@ -135,15 +135,20 @@ async fn main() -> Result<(), Error> {
         depth_reached, len_words, len_urls
     );
 
-    let mut file = fs::File::create(args.output.clone()).expect("Error creating dictionary file");
-    let mut contents = String::new();
-    words.iter().for_each(|word| {
-        let line = format!("{}\n", word);
-        contents.push_str(&line);
-    });
-    file.write_all(contents.as_bytes())
-        .expect("Error writing to dictionary");
-    info!("dictionary written to: {}", args.output);
+    if args.no_write {
+        info!("Skipping dictionary creation");
+    } else {
+        let mut file =
+            fs::File::create(args.output.clone()).expect("Error creating dictionary file");
+        let mut contents = String::new();
+        words.iter().for_each(|word| {
+            let line = format!("{}\n", word);
+            contents.push_str(&line);
+        });
+        file.write_all(contents.as_bytes())
+            .expect("Error writing to dictionary");
+        info!("dictionary written to: {}", args.output);
+    }
 
     if args.output_state {
         let out_state = State {

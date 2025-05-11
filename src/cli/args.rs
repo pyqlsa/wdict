@@ -53,6 +53,9 @@ pub struct Cli {
     /// Append extracted words to an existing dictionary.
     #[arg(long, default_value_t = false)]
     pub append: bool,
+    /// Skip writing words to an output file (i.e. save your disk while benchmarking).
+    #[arg(long, default_value_t = false)]
+    pub no_write: bool,
     /// Write crawl state to a file.
     #[arg(long, default_value_t = false)]
     pub output_state: bool,
@@ -195,6 +198,26 @@ pub enum FilterArg {
     NoAscii,
     /// Keep only words that exclusively contain ascii characters.
     OnlyAscii,
+    /// Transform words to lowercase.
+    ToLower,
+    /// Ignore words that consist of all lowercase characters.
+    AllLower,
+    /// Ignore words that contain any lowercase character.
+    AnyLower,
+    /// Ignore words that contain no lowercase characters.
+    NoLower,
+    /// Keep only words that exclusively contain lowercase characters.
+    OnlyLower,
+    /// Transform words to uppercase.
+    ToUpper,
+    /// Ignore words that consist of all uppercase characters.
+    AllUpper,
+    /// Ignore words that contain any uppercase character.
+    AnyUpper,
+    /// Ignore words that contain no uppercase characters.
+    NoUpper,
+    /// Keep only words that exclusively contain uppercase characters.
+    OnlyUpper,
     /// Leave the word as-is.
     None,
 }
@@ -213,6 +236,16 @@ impl FilterArg {
             Self::AnyAscii => FilterMode::AnyAscii,
             Self::NoAscii => FilterMode::NoAscii,
             Self::OnlyAscii => FilterMode::OnlyAscii,
+            Self::ToLower => FilterMode::ToLower,
+            Self::AllLower => FilterMode::AllLower,
+            Self::AnyLower => FilterMode::AnyLower,
+            Self::OnlyLower => FilterMode::OnlyLower,
+            Self::NoLower => FilterMode::NoLower,
+            Self::ToUpper => FilterMode::ToUpper,
+            Self::AllUpper => FilterMode::AllUpper,
+            Self::AnyUpper => FilterMode::AnyUpper,
+            Self::OnlyUpper => FilterMode::OnlyUpper,
+            Self::NoUpper => FilterMode::NoUpper,
             Self::None => FilterMode::None,
         }
     }
@@ -243,6 +276,16 @@ impl std::fmt::Display for FilterArg {
             Self::AnyAscii => write!(f, "any-ascii"),
             Self::NoAscii => write!(f, "no-ascii"),
             Self::OnlyAscii => write!(f, "only-ascii"),
+            Self::ToLower => write!(f, "to-lower"),
+            Self::AllLower => write!(f, "all-lower"),
+            Self::AnyLower => write!(f, "any-lower"),
+            Self::OnlyLower => write!(f, "only-lower"),
+            Self::NoLower => write!(f, "no-lower"),
+            Self::ToUpper => write!(f, "to-upper"),
+            Self::AllUpper => write!(f, "all-upper"),
+            Self::AnyUpper => write!(f, "any-upper"),
+            Self::OnlyUpper => write!(f, "only-upper"),
+            Self::NoUpper => write!(f, "no-upper"),
             Self::None => write!(f, "none"),
         }
     }
@@ -277,6 +320,16 @@ impl<'de> Deserialize<'de> for FilterArg {
             "any-ascii" => Ok(Self::AnyAscii),
             "no-ascii" => Ok(Self::NoAscii),
             "only-ascii" => Ok(Self::OnlyAscii),
+            "to-lower" => Ok(Self::ToLower),
+            "all-lower" => Ok(Self::AllLower),
+            "any-lower" => Ok(Self::AnyLower),
+            "only-lower" => Ok(Self::OnlyLower),
+            "no-lower" => Ok(Self::NoLower),
+            "to-upper" => Ok(Self::ToUpper),
+            "all-upper" => Ok(Self::AllUpper),
+            "any-upper" => Ok(Self::AnyUpper),
+            "only-upper" => Ok(Self::OnlyUpper),
+            "no-upper" => Ok(Self::NoUpper),
             "none" => Ok(Self::None),
             _ => Err(serde::de::Error::custom("Expected a valid filter arg")),
         }

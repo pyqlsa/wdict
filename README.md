@@ -100,6 +100,16 @@ Options:
           - any-ascii:    Ignore words that contain any ascii character
           - no-ascii:     Ignore words that contain no ascii characters
           - only-ascii:   Keep only words that exclusively contain ascii characters
+          - to-lower:     Transform words to lowercase
+          - all-lower:    Ignore words that consist of all lowercase characters
+          - any-lower:    Ignore words that contain any lowercase character
+          - no-lower:     Ignore words that contain no lowercase characters
+          - only-lower:   Keep only words that exclusively contain lowercase characters
+          - to-upper:     Transform words to uppercase
+          - all-upper:    Ignore words that consist of all uppercase characters
+          - any-upper:    Ignore words that contain any uppercase character
+          - no-upper:     Ignore words that contain no uppercase characters
+          - only-upper:   Keep only words that exclusively contain uppercase characters
           - none:         Leave the word as-is
 
       --site-policy <SITE_POLICY>

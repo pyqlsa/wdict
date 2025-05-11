@@ -28,6 +28,26 @@ pub enum FilterMode {
     NoAscii,
     /// Keep only words that exclusively contain ascii characters.
     OnlyAscii,
+    /// Transform words to lowercase.
+    ToLower,
+    /// Ignore words that consist of all lowercase characters.
+    AllLower,
+    /// Ignore words that contain any lowercase character.
+    AnyLower,
+    /// Ignore words that contain no lowercase characters.
+    NoLower,
+    /// Keep only words that exclusively contain lowercase characters.
+    OnlyLower,
+    /// Transform words to uppercase.
+    ToUpper,
+    /// Ignore words that consist of all uppercase characters.
+    AllUpper,
+    /// Ignore words that contain any uppercase character.
+    AnyUpper,
+    /// Ignore words that contain no uppercase characters.
+    NoUpper,
+    /// Keep only words that exclusively contain uppercase characters.
+    OnlyUpper,
     /// Leave the word as-is.
     None,
 }
@@ -46,6 +66,16 @@ impl std::fmt::Display for FilterMode {
             Self::AnyAscii => write!(f, "any-ascii"),
             Self::NoAscii => write!(f, "no-ascii"),
             Self::OnlyAscii => write!(f, "only-ascii"),
+            Self::ToLower => write!(f, "to-lower"),
+            Self::AllLower => write!(f, "all-lower"),
+            Self::AnyLower => write!(f, "any-lower"),
+            Self::OnlyLower => write!(f, "only-lower"),
+            Self::NoLower => write!(f, "no-lower"),
+            Self::ToUpper => write!(f, "to-upper"),
+            Self::AllUpper => write!(f, "all-upper"),
+            Self::AnyUpper => write!(f, "any-upper"),
+            Self::OnlyUpper => write!(f, "only-upper"),
+            Self::NoUpper => write!(f, "no-upper"),
             Self::None => write!(f, "none"),
         }
     }
@@ -65,11 +95,22 @@ impl FilterMode {
             Self::AnyAscii => ignore_any_ascii(s),
             Self::NoAscii => ignore_no_ascii(s),
             Self::OnlyAscii => keep_only_ascii(s),
+            Self::ToLower => filter_to_lower(s),
+            Self::AllLower => ignore_all_lowercase(s),
+            Self::AnyLower => ignore_any_lowercase(s),
+            Self::NoLower => ignore_no_lowercase(s),
+            Self::OnlyLower => keep_only_lowercase(s),
+            Self::ToUpper => filter_to_upper(s),
+            Self::AllUpper => ignore_all_uppercase(s),
+            Self::AnyUpper => ignore_any_uppercase(s),
+            Self::NoUpper => ignore_no_uppercase(s),
+            Self::OnlyUpper => keep_only_uppercase(s),
             //Self::None => s.to_string(),
             Self::None => {}
         };
     }
 }
+
 fn filter_deunicode(s: &mut String) {
     *s = deunicode(s); // seems to be faster than `s.replace_range(.., &deunicode(s));`
 }
@@ -84,7 +125,7 @@ fn filter_decancer(s: &mut String) {
     };
 }
 
-fn flag_numeric_chars(s: &mut String) -> Vec<bool> {
+fn flag_numeric_chars(s: &String) -> Vec<bool> {
     s.chars().map(|c| c.is_numeric()).collect()
 }
 
@@ -112,7 +153,7 @@ fn keep_only_numeric(s: &mut String) {
     }
 }
 
-fn flag_ascii_chars(s: &mut String) -> Vec<bool> {
+fn flag_ascii_chars(s: &String) -> Vec<bool> {
     s.chars().map(|c| c.is_ascii()).collect()
 }
 
@@ -136,6 +177,70 @@ fn ignore_no_ascii(s: &mut String) {
 
 fn keep_only_ascii(s: &mut String) {
     if flag_ascii_chars(s).contains(&false) {
+        s.clear();
+    }
+}
+
+fn filter_to_lower(s: &mut String) {
+    *s = s.to_lowercase();
+}
+
+fn flag_lowercase_chars(s: &String) -> Vec<bool> {
+    s.chars().map(|c| c.is_lowercase()).collect()
+}
+
+fn ignore_all_lowercase(s: &mut String) {
+    if !flag_lowercase_chars(s).contains(&false) {
+        s.clear();
+    }
+}
+
+fn ignore_any_lowercase(s: &mut String) {
+    if flag_lowercase_chars(s).contains(&true) {
+        s.clear();
+    }
+}
+
+fn ignore_no_lowercase(s: &mut String) {
+    if !flag_lowercase_chars(s).contains(&true) {
+        s.clear()
+    }
+}
+
+fn keep_only_lowercase(s: &mut String) {
+    if flag_lowercase_chars(s).contains(&false) {
+        s.clear();
+    }
+}
+
+fn filter_to_upper(s: &mut String) {
+    *s = s.to_uppercase();
+}
+
+fn flag_uppercase_chars(s: &String) -> Vec<bool> {
+    s.chars().map(|c| c.is_uppercase()).collect()
+}
+
+fn ignore_all_uppercase(s: &mut String) {
+    if !flag_uppercase_chars(s).contains(&false) {
+        s.clear();
+    }
+}
+
+fn ignore_any_uppercase(s: &mut String) {
+    if flag_uppercase_chars(s).contains(&true) {
+        s.clear();
+    }
+}
+
+fn ignore_no_uppercase(s: &mut String) {
+    if !flag_uppercase_chars(s).contains(&true) {
+        s.clear()
+    }
+}
+
+fn keep_only_uppercase(s: &mut String) {
+    if flag_uppercase_chars(s).contains(&false) {
         s.clear();
     }
 }
@@ -223,5 +328,59 @@ mod tests {
         keep_only_ascii_7: (keep_only_ascii, "українська", ""),
         keep_only_ascii_8: (keep_only_ascii, "العربية", ""),
         keep_only_ascii_9: (keep_only_ascii, "", ""),
+
+        filter_to_lower_0: (filter_to_lower, "", ""),
+        filter_to_lower_1: (filter_to_lower, "aa", "aa"),
+        filter_to_lower_2: (filter_to_lower, "AA", "aa"),
+        filter_to_lower_3: (filter_to_lower, "Aa", "aa"),
+        filter_to_lower_4: (filter_to_lower, "A1", "a1"),
+        filter_to_lower_5: (filter_to_lower, "21", "21"),
+
+        ignore_all_lower_0: (ignore_all_lowercase, "", ""),
+        ignore_all_lower_1: (ignore_all_lowercase, "aaa", ""),
+        ignore_all_lower_2: (ignore_all_lowercase, "aAa", "aAa"),
+        ignore_all_lower_3: (ignore_all_lowercase, "AAA", "AAA"),
+
+        ignore_any_lower_0: (ignore_any_lowercase, "", ""),
+        ignore_any_lower_1: (ignore_any_lowercase, "aaa", ""),
+        ignore_any_lower_2: (ignore_any_lowercase, "aAa", ""),
+        ignore_any_lower_3: (ignore_any_lowercase, "AAA", "AAA"),
+
+        ignore_no_lower_0: (ignore_no_lowercase, "", ""),
+        ignore_no_lower_1: (ignore_no_lowercase, "aaa", "aaa"),
+        ignore_no_lower_2: (ignore_no_lowercase, "aAa", "aAa"),
+        ignore_no_lower_3: (ignore_no_lowercase, "AAA", ""),
+
+        keep_only_lower_0: (keep_only_lowercase, "", ""),
+        keep_only_lower_1: (keep_only_lowercase, "aaa", "aaa"),
+        keep_only_lower_2: (keep_only_lowercase, "aAa", ""),
+        keep_only_lower_3: (keep_only_lowercase, "AAA", ""),
+
+        filter_to_upper_0: (filter_to_upper, "", ""),
+        filter_to_upper_1: (filter_to_upper, "aa", "AA"),
+        filter_to_upper_2: (filter_to_upper, "AA", "AA"),
+        filter_to_upper_3: (filter_to_upper, "Aa", "AA"),
+        filter_to_upper_4: (filter_to_upper, "A1", "A1"),
+        filter_to_upper_5: (filter_to_upper, "21", "21"),
+
+        ignore_all_upper_0: (ignore_all_uppercase, "", ""),
+        ignore_all_upper_1: (ignore_all_uppercase, "aaa", "aaa"),
+        ignore_all_upper_2: (ignore_all_uppercase, "aAa", "aAa"),
+        ignore_all_upper_3: (ignore_all_uppercase, "AAA", ""),
+
+        ignore_any_upper_0: (ignore_any_uppercase, "", ""),
+        ignore_any_upper_1: (ignore_any_uppercase, "aaa", "aaa"),
+        ignore_any_upper_2: (ignore_any_uppercase, "aAa", ""),
+        ignore_any_upper_3: (ignore_any_uppercase, "AAA", ""),
+
+        ignore_no_upper_0: (ignore_no_uppercase, "", ""),
+        ignore_no_upper_1: (ignore_no_uppercase, "aaa", ""),
+        ignore_no_upper_2: (ignore_no_uppercase, "aAa", "aAa"),
+        ignore_no_upper_3: (ignore_no_uppercase, "AAA", "AAA"),
+
+        keep_only_upper_0: (keep_only_uppercase, "", ""),
+        keep_only_upper_1: (keep_only_uppercase, "aaa", ""),
+        keep_only_upper_2: (keep_only_uppercase, "aAa", ""),
+        keep_only_upper_3: (keep_only_uppercase, "AAA", "AAA"),
     }
 }
