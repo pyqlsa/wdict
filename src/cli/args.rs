@@ -42,10 +42,10 @@ pub struct Cli {
     #[arg(long, default_value = "same", value_enum)]
     pub site_policy: SitePolicyArg,
     /// Number of requests to make per second.
-    #[arg(short, long, default_value_t = 5)]
+    #[arg(short, long, default_value_t = 10)]
     pub req_per_sec: u64,
     /// Limit the number of concurrent requests to this value.
-    #[arg(short = 'l', long, default_value_t = 5)]
+    #[arg(short = 'l', long, default_value_t = 10)]
     pub limit_concurrent: usize,
     /// File to write dictionary to (will be overwritten if it already exists).
     #[arg(short, long, default_value = "wdict.txt", value_parser = helpers::str_not_whitespace_parser())]

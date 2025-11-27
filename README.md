@@ -87,8 +87,6 @@ Options:
       --filters <FILTERS>...
           Filter strategy for words; multiple can be specified (comma separated)
 
-          [default: none]
-
           Possible values:
           - deunicode:    Transform unicode according to <https://github.com/kornelski/deunicode>
           - decancer:     Transform unicode according to <https://github.com/null8626/decancer>
@@ -112,10 +110,10 @@ Options:
           - only-upper:   Keep only words that exclusively contain uppercase characters
           - none:         Leave the word as-is
 
+          [default: none]
+
       --site-policy <SITE_POLICY>
           Site policy for discovered URLs
-
-          [default: same]
 
           Possible values:
           - same:      Allow crawling URL, only if the domain exactly matches
@@ -123,15 +121,17 @@ Options:
           - sibling:   Allow crawling URLs if they are the same domain or a sibling
           - all:       Allow crawling all URLs, regardless of domain
 
+          [default: same]
+
   -r, --req-per-sec <REQ_PER_SEC>
           Number of requests to make per second
 
-          [default: 5]
+          [default: 10]
 
   -l, --limit-concurrent <LIMIT_CONCURRENT>
           Limit the number of concurrent requests to this value
 
-          [default: 5]
+          [default: 10]
 
   -o, --output <OUTPUT>
           File to write dictionary to (will be overwritten if it already exists)
@@ -140,6 +140,9 @@ Options:
 
       --append
           Append extracted words to an existing dictionary
+
+      --no-write
+          Skip writing words to an output file (i.e. save your disk while benchmarking)
 
       --output-state
           Write crawl state to a file

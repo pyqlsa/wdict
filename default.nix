@@ -1,8 +1,6 @@
 { lib
-, darwin
-, system
 , naersk
-, targetPlatform
+, stdenv
 , pkg-config
 , libiconv
 , rustfmt
@@ -15,8 +13,9 @@
 let
   cargoToml = builtins.fromTOML (builtins.readFile ./Cargo.toml);
   optionalItems = cond: items: if cond then items else [ ];
+  system = stdenv.targetPlatform.system;
 in
-naersk.lib."${targetPlatform.system}".buildPackage {
+naersk.lib."${system}".buildPackage {
   pname = cargoToml.package.name;
   version = cargoToml.package.version;
   src = ./.;
@@ -28,8 +27,10 @@ naersk.lib."${targetPlatform.system}".buildPackage {
     pkg-config
     libiconv
     openssl
-  ] ++ (optionalItems (system == "aarch64-darwin") [
-    darwin.apple_sdk.frameworks.SystemConfiguration
+  ]
+  # TODO: determine how to get darwin builds working again
+  ++ (optionalItems (system == "aarch64-darwin") [
+    #  apple-sdk.frameworks.SystemConfiguration
   ]);
 
   checkInputs = [
