@@ -139,23 +139,23 @@ pub fn fill_urldb_from_state(db: &mut UrlDb, s: &mut State) {
     s.visited
         .drain(0..)
         .into_iter()
-        .for_each(|u| db.mark_visited(u));
+        .for_each(|u| db.mark_visited(&u));
     s.staged
         .drain(0..)
         .into_iter()
-        .for_each(|u| db.mark_staged(u));
+        .for_each(|u| db.mark_staged(&u));
     s.unvisited
         .drain(0..)
         .into_iter()
-        .for_each(|u| db.mark_unvisited(u));
+        .for_each(|u| db.mark_unvisited(&u));
     s.skipped
         .drain(0..)
         .into_iter()
-        .for_each(|u| db.mark_skipped(u));
+        .for_each(|u| db.mark_skipped(&u));
     s.errored
         .drain(0..)
         .into_iter()
-        .for_each(|u| db.mark_errored(u));
+        .for_each(|u| db.mark_errored(&u));
 }
 
 // Popuplate worddb from existing dictionary.

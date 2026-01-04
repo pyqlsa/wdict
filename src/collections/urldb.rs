@@ -105,7 +105,7 @@ impl UrlDb {
     }
 
     /// Inserts and marks a url as visited.
-    pub fn mark_visited(&mut self, url: String) -> () {
+    pub fn mark_visited(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -114,7 +114,7 @@ impl UrlDb {
     }
 
     /// Inserts and marks a url as staged.
-    pub fn mark_staged(&mut self, url: String) -> () {
+    pub fn mark_staged(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -123,7 +123,7 @@ impl UrlDb {
     }
 
     /// Inserts and marks a url as unvisited.
-    pub fn mark_unvisited(&mut self, url: String) -> () {
+    pub fn mark_unvisited(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -132,7 +132,7 @@ impl UrlDb {
     }
 
     /// Inserts and marks a url as skipped.
-    pub fn mark_skipped(&mut self, url: String) -> () {
+    pub fn mark_skipped(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -141,7 +141,7 @@ impl UrlDb {
     }
 
     /// Inserts and marks a url as errored.
-    pub fn mark_errored(&mut self, url: String) -> () {
+    pub fn mark_errored(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -150,48 +150,48 @@ impl UrlDb {
     }
 
     /// Inserts and marks a url as visited, only if the url is new.
-    pub fn cond_mark_visited(&mut self, url: String) -> () {
+    pub fn cond_mark_visited(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        hm.entry(url.clone()).or_insert(Status::Visited);
+        hm.entry(url.to_owned()).or_insert(Status::Visited);
     }
 
     /// Inserts and marks a url as staged, only if the url is new.
-    pub fn cond_mark_staged(&mut self, url: String) -> () {
+    pub fn cond_mark_staged(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        hm.entry(url.clone()).or_insert(Status::Staged);
+        hm.entry(url.to_owned()).or_insert(Status::Staged);
     }
 
     /// Inserts and marks a url as unvisited, only if the url is new.
-    pub fn cond_mark_unvisited(&mut self, url: String) -> () {
+    pub fn cond_mark_unvisited(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        hm.entry(url.clone()).or_insert(Status::Unvisited);
+        hm.entry(url.to_owned()).or_insert(Status::Unvisited);
     }
 
     /// Inserts and marks a url as skipped, only if the url is new.
-    pub fn cond_mark_skipped(&mut self, url: String) -> () {
+    pub fn cond_mark_skipped(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        hm.entry(url.clone()).or_insert(Status::Skip);
+        hm.entry(url.to_owned()).or_insert(Status::Skip);
     }
 
     /// Inserts and marks a url as errored, only if the url is new.
-    pub fn cond_mark_errored(&mut self, url: String) -> () {
+    pub fn cond_mark_errored(&mut self, url: &str) -> () {
         let mut hm: MutexGuard<HashMap<String, Status>> = match self.0.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        hm.entry(url.clone()).or_insert(Status::Error);
+        hm.entry(url.to_owned()).or_insert(Status::Error);
     }
 
     /// Move all unvisited urls onto the stage.

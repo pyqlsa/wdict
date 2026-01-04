@@ -39,7 +39,10 @@ impl Shutdown {
     }
 
     /// Returns `true` if the shutdown signal has been received.
-    pub fn is_shutdown(&self) -> bool {
+    pub fn is_shutdown(&mut self) -> bool {
+        if self.notify.is_closed() {
+            self.is_shutdown = true;
+        }
         self.is_shutdown
     }
 

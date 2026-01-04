@@ -5,27 +5,72 @@ use ratelimit::Ratelimiter;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
 use std::collections::VecDeque;
+use std::fs;
+use std::io::Read;
 use std::sync::Arc;
-use std::{fs, io::Read};
 use tokio::sync::Semaphore;
 use tokio::time::{sleep, Duration};
 
-use crate::collections::UrlDb;
+use crate::collections::{UrlDb, WordDb};
 use crate::error::Error;
-use crate::extract::Extractor;
+use crate::extract::{ExtractOptions, Extractor};
 use crate::shutdown::Shutdown;
 use crate::utils;
 
 use super::SitePolicy;
 
+// light - ░
+// medium - ▒
+// dark - ▓
+// solid - █
+const DARK_LIGHT_BLOCKS: &str = "▓░";
+const SPINNER_TICKS_STYLE_1: [&str; 35] = [
+    "░░░░░░░░░░░░░░░░░░░░",
+    "░░░░░░░░░░░░░░░░░░░░",
+    "░░░░░░░░░░░░░░░░░░░░",
+    "▓░░░░░░░░░░░░░░░░░░░",
+    "▓▓░░░░░░░░░░░░░░░░░░",
+    "▓▓▓░░░░░░░░░░░░░░░░░",
+    "▓▓▓▓░░░░░░░░░░░░░░░░",
+    "▓▓▓▓▓░░░░░░░░░░░░░░░",
+    "▓▓▓▓▓▓░░░░░░░░░░░░░░",
+    "▓▓▓▓▓▓▓░░░░░░░░░░░░░",
+    "▓▓▓▓▓▓▓▓░░░░░░░░░░░░",
+    "▓▓▓▓▓▓▓▓▓░░░░░░░░░░░",
+    "▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░",
+    "░▓▓▓▓▓▓▓▓▓▓░░░░░░░░░",
+    "░░▓▓▓▓▓▓▓▓▓▓░░░░░░░░",
+    "░░░▓▓▓▓▓▓▓▓▓▓░░░░░░░",
+    "░░░░▓▓▓▓▓▓▓▓▓▓░░░░░░",
+    "░░░░░▓▓▓▓▓▓▓▓▓▓░░░░░",
+    "░░░░░░▓▓▓▓▓▓▓▓▓▓░░░░",
+    "░░░░░░░▓▓▓▓▓▓▓▓▓▓░░░",
+    "░░░░░░░░▓▓▓▓▓▓▓▓▓▓░░",
+    "░░░░░░░░░▓▓▓▓▓▓▓▓▓▓░",
+    "░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓",
+    "░░░░░░░░░░░▓▓▓▓▓▓▓▓▓",
+    "░░░░░░░░░░░░▓▓▓▓▓▓▓▓",
+    "░░░░░░░░░░░░░▓▓▓▓▓▓▓",
+    "░░░░░░░░░░░░░░▓▓▓▓▓▓",
+    "░░░░░░░░░░░░░░░▓▓▓▓▓",
+    "░░░░░░░░░░░░░░░░▓▓▓▓",
+    "░░░░░░░░░░░░░░░░░▓▓▓",
+    "░░░░░░░░░░░░░░░░░░▓▓",
+    "░░░░░░░░░░░░░░░░░░░▓",
+    "░░░░░░░░░░░░░░░░░░░░",
+    "░░░░░░░░░░░░░░░░░░░░",
+    "░░░░░░░░░░░░░░░░░░░░",
+];
+
 /// Crawls websites, gathering urls from pages.
 pub struct Crawler {
     client: Client,
-    opts: CrawlOptions,
+    copts: CrawlOptions,
+    eopts: ExtractOptions,
     urldb: UrlDb,
+    worddb: WordDb,
     cur_depth: usize,
     limiter: Ratelimiter,
-    extractor: Extractor,
     multiprog: MultiProgress,
     /// Listen for shutdown notifications.
     ///
@@ -36,9 +81,10 @@ pub struct Crawler {
 impl Crawler {
     /// Returns a new Crawler instance with the default `reqwest::Client`.
     pub fn new(
-        opts: CrawlOptions,
+        copts: CrawlOptions,
+        eopts: ExtractOptions,
         urldb: UrlDb,
-        extractor: Extractor,
+        worddb: WordDb,
         shutdown: Shutdown,
         multiprog: MultiProgress,
     ) -> Result<Self, Error> {
@@ -46,39 +92,41 @@ impl Crawler {
             .connect_timeout(Duration::from_secs(5))
             .timeout(Duration::from_secs(10))
             .build()?;
-        Self::new_with_client(client, opts, urldb, extractor, shutdown, multiprog)
+        Self::new_with_client(client, copts, eopts, urldb, worddb, shutdown, multiprog)
     }
 
     /// Returns a new Crawler instance with the provided `reqwest::Client`.
     pub fn new_with_client(
         client: Client,
-        opts: CrawlOptions,
+        copts: CrawlOptions,
+        eopts: ExtractOptions,
         urldb: UrlDb,
-        extractor: Extractor,
+        worddb: WordDb,
         shutdown: Shutdown,
         multiprog: MultiProgress,
     ) -> Result<Self, Error> {
-        let tokens = if opts.requests_per_second() < 1 {
+        let tokens = if copts.requests_per_second() < 1 {
             1
         } else {
-            opts.requests_per_second()
+            copts.requests_per_second()
         };
         let limiter = Ratelimiter::builder(tokens, Duration::from_secs(1))
             .max_tokens(tokens)
             .initial_available(tokens / 2)
             .build()?;
-        let start_url = opts.url.clone();
+        let start_url = copts.url.clone();
         let mut crawler = Self {
-            opts,
-            urldb,
-            cur_depth: 0,
             client,
+            copts,
+            eopts,
+            urldb,
+            worddb,
+            cur_depth: 0,
             limiter,
-            extractor,
             shutdown,
             multiprog,
         };
-        crawler.urldb.cond_mark_unvisited(String::from(start_url));
+        crawler.urldb.cond_mark_unvisited(start_url.as_str());
         Ok(crawler)
     }
 
@@ -87,8 +135,8 @@ impl Crawler {
     /// in local mode, the directory structure is traversed to find documents;
     /// returns the maximum depth reached upon success.
     pub async fn crawl(&mut self) -> Result<usize, Error> {
-        let semaphore = Arc::new(Semaphore::new(self.opts.limit_concurrent()));
-        while self.cur_depth < self.opts.depth() {
+        let semaphore = Arc::new(Semaphore::new(self.copts.limit_concurrent()));
+        while self.cur_depth < self.copts.depth() {
             // if staged urls are exhausted, populate stage and ratchet up depth
             if self.urldb.num_staged_urls() < 1 {
                 self.urldb.stage_unvisited_urls();
@@ -97,8 +145,9 @@ impl Crawler {
                 info!("candidate urls exhausted...");
                 break;
             }
+
             info!("crawling at depth {}", self.cur_depth);
-            let pb = self.new_staged_progress();
+            let pb = self.new_stage_progress();
             let mut jhs = VecDeque::new();
             for url_str in self.urldb.staged_urls_iter() {
                 if self.observe_limit().await {
@@ -106,15 +155,16 @@ impl Crawler {
                 }
 
                 let mut spider = self.build_spider();
-                let mut e = self.extractor.clone();
+                let mut extractor = self.build_extractor();
                 let sem = semaphore.clone();
                 let pbc = pb.clone();
                 let jh = tokio::spawn(async move {
                     let permit = sem.acquire().await.unwrap();
                     if let Some(doc) = spider.crawl_url(&url_str).await {
-                        e.words_from_doc(&doc);
+                        extractor.words_from_doc(&doc);
                     }
                     pbc.inc(1);
+                    pbc.set_message(format!("completed {}", url_str));
                     drop(permit);
                 });
                 jhs.push_back(jh);
@@ -126,6 +176,7 @@ impl Crawler {
                     let _ = jh.await;
                 }
             }
+
             // outer shutdown check before depth step, as we may have been
             // shutdown before completing current depth
             if self.shutdown.is_shutdown() {
@@ -150,7 +201,7 @@ impl Crawler {
                 sleep(dur).await;
             }
             // soften how we hit the limiter
-            let millis = 1000 / self.opts.req_per_sec;
+            let millis = 1000 / self.copts.req_per_sec;
             sleep(Duration::from_millis(millis)).await;
           } => {}
           _ = self.shutdown.recv() => {}
@@ -163,10 +214,15 @@ impl Crawler {
     fn build_spider(&self) -> Spider {
         Spider::new(
             self.client.clone(),
-            self.opts.clone(),
+            self.copts.clone(),
             self.urldb.clone(),
             self.shutdown.clone(),
         )
+    }
+
+    // Builds and returns a new extractor.
+    fn build_extractor(&self) -> Extractor {
+        Extractor::new(self.eopts.clone(), self.worddb.clone())
     }
 
     /// Force the current crawl depth to be of the given value.
@@ -176,7 +232,7 @@ impl Crawler {
 
     /// Returns a new progress bar to track urls in the next stage;
     /// if we have too many urls for some reason, returns a spinner.
-    fn new_staged_progress(&self) -> ProgressBar {
+    fn new_stage_progress(&self) -> ProgressBar {
         let pb = if let Ok(size) = self.urldb.num_staged_urls().try_into() {
             let bar = styled_progress(size);
             self.multiprog.add(bar)
@@ -190,61 +246,25 @@ impl Crawler {
 }
 
 fn styled_progress(size: u64) -> ProgressBar {
-    // light - ░
-    // medium - ▒
-    // dark - ▓
-    // solid - █
     let bar = ProgressBar::new(size);
     // deliberate 2 spaces at the end of the template string
     bar.set_style(
-        ProgressStyle::with_template("[{prefix:.cyan}] |{wide_bar}| {pos:.blue}/{len:.blue}  ")
-            .unwrap()
-            .progress_chars("▓░"), // dark/light
+        ProgressStyle::with_template(
+            "[{prefix:.cyan}] {spinner:.green} |{wide_bar}| {pos:.blue}/{len:.blue}  ",
+        )
+        .unwrap()
+        .progress_chars(DARK_LIGHT_BLOCKS), // dark/light
     );
+    bar.enable_steady_tick(Duration::from_millis(100));
     bar
 }
 
 fn styled_spinner() -> ProgressBar {
     let bar = ProgressBar::new_spinner();
     bar.set_style(
-        ProgressStyle::with_template("[{prefix:.cyan}] |{spinner}|")
+        ProgressStyle::with_template("[{prefix:.cyan}] |{spinner}| {msg}")
             .unwrap()
-            .tick_strings(&[
-                "░░░░░░░░░░░░░░░░░░░░",
-                "░░░░░░░░░░░░░░░░░░░░",
-                "▓░░░░░░░░░░░░░░░░░░░",
-                "▓▓░░░░░░░░░░░░░░░░░░",
-                "▓▓▓░░░░░░░░░░░░░░░░░",
-                "▓▓▓▓░░░░░░░░░░░░░░░░",
-                "▓▓▓▓▓░░░░░░░░░░░░░░░",
-                "▓▓▓▓▓▓░░░░░░░░░░░░░░",
-                "▓▓▓▓▓▓▓░░░░░░░░░░░░░",
-                "▓▓▓▓▓▓▓▓░░░░░░░░░░░░",
-                "▓▓▓▓▓▓▓▓▓░░░░░░░░░░░",
-                "▓▓▓▓▓▓▓▓▓▓░░░░░░░░░░",
-                "░▓▓▓▓▓▓▓▓▓▓░░░░░░░░░",
-                "░░▓▓▓▓▓▓▓▓▓▓░░░░░░░░",
-                "░░░▓▓▓▓▓▓▓▓▓▓░░░░░░░",
-                "░░░░▓▓▓▓▓▓▓▓▓▓░░░░░░",
-                "░░░░░▓▓▓▓▓▓▓▓▓▓░░░░░",
-                "░░░░░░▓▓▓▓▓▓▓▓▓▓░░░░",
-                "░░░░░░░▓▓▓▓▓▓▓▓▓▓░░░",
-                "░░░░░░░░▓▓▓▓▓▓▓▓▓▓░░",
-                "░░░░░░░░░▓▓▓▓▓▓▓▓▓▓░",
-                "░░░░░░░░░░▓▓▓▓▓▓▓▓▓▓",
-                "░░░░░░░░░░░▓▓▓▓▓▓▓▓▓",
-                "░░░░░░░░░░░░▓▓▓▓▓▓▓▓",
-                "░░░░░░░░░░░░░▓▓▓▓▓▓▓",
-                "░░░░░░░░░░░░░░▓▓▓▓▓▓",
-                "░░░░░░░░░░░░░░░▓▓▓▓▓",
-                "░░░░░░░░░░░░░░░░▓▓▓▓",
-                "░░░░░░░░░░░░░░░░░▓▓▓",
-                "░░░░░░░░░░░░░░░░░░▓▓",
-                "░░░░░░░░░░░░░░░░░░░▓",
-                "░░░░░░░░░░░░░░░░░░░░",
-                "░░░░░░░░░░░░░░░░░░░░",
-                "░░░░░░░░░░░░░░░░░░░░",
-            ]),
+            .tick_strings(&SPINNER_TICKS_STYLE_1),
     );
     bar.enable_steady_tick(Duration::from_millis(100));
     bar
@@ -273,7 +293,7 @@ impl Spider {
         }
     }
 
-    async fn crawl_url(&mut self, url_str: &String) -> Option<Bytes> {
+    async fn crawl_url(&mut self, url_str: &str) -> Option<Bytes> {
         // give us a chance to receive graceful shutdown signal
         tokio::select! {
           _ = sleep(Duration::from_millis(u64::from(utils::num_between(20, 120)))) => {}
@@ -283,28 +303,28 @@ impl Spider {
             return None;
         }
 
-        let result = Url::parse(url_str.as_str());
+        let result = Url::parse(url_str);
         if let Err(e) = result {
             debug!("not a url: {}", e);
-            self.urldb.mark_errored(url_str.clone());
+            self.urldb.mark_errored(url_str);
             return None;
         }
         let url = result.unwrap();
 
         match self.opts.mode {
             CrawlMode::Web => self.crawl_web(&url).await,
-            CrawlMode::Local => self.crawl_local(&url).await,
+            CrawlMode::Local => self.crawl_local(&url),
         }
     }
 
-    async fn crawl_local(&mut self, url: &Url) -> Option<Bytes> {
+    fn crawl_local(&mut self, url: &Url) -> Option<Bytes> {
         let path = url.to_file_path().unwrap();
         let display = path.display();
 
         trace!("visiting {}", display);
         let meta_res = fs::metadata(&path);
         if let Err(e) = meta_res {
-            self.urldb.mark_errored(url.to_string());
+            self.urldb.mark_errored(url.as_str());
             warn!("error getting path metadata {}: {}", display, e);
             return None;
         }
@@ -327,7 +347,7 @@ impl Spider {
 
         let file_res = fs::File::open(&path);
         if let Err(e) = file_res {
-            self.urldb.mark_errored(url.to_string());
+            self.urldb.mark_errored(url.as_str());
             warn!("error opening file {}: {}", display, e);
             return None;
         }
@@ -336,12 +356,12 @@ impl Spider {
         let mut buf = Vec::new();
         match file.read_to_end(&mut buf) {
             Err(e) => {
-                self.urldb.mark_errored(url.to_string());
+                self.urldb.mark_errored(url.as_str());
                 warn!("error reading file {}: {}", display, e);
                 None
             }
             Ok(_) => {
-                self.urldb.mark_visited(url.to_string());
+                self.urldb.mark_visited(url.as_str());
                 Some(Bytes::from(buf))
             }
         }
@@ -353,7 +373,7 @@ impl Spider {
 
         let paths_res = fs::read_dir(&path);
         if let Err(e) = paths_res {
-            self.urldb.mark_errored(url.to_string());
+            self.urldb.mark_errored(url.as_str());
             warn!("error reading directory {}: {}", display, e);
             return;
         }
@@ -374,12 +394,12 @@ impl Spider {
                             continue;
                         }
                         Ok(u) => {
-                            self.urldb.mark_unvisited(u.to_string());
+                            self.urldb.mark_unvisited(u.as_str());
                         }
                     }
                 }
             }
-            self.urldb.mark_visited(url.to_string());
+            self.urldb.mark_visited(url.as_str());
         }
     }
 
@@ -390,7 +410,7 @@ impl Spider {
                 self.opts.site(),
                 url.as_str()
             );
-            self.urldb.mark_skipped(url.as_str().to_string());
+            self.urldb.mark_skipped(url.as_str());
             return None;
         }
 
@@ -399,7 +419,7 @@ impl Spider {
         match document {
             Ok(doc) => {
                 let doc_string = String::from_utf8_lossy(&doc).to_string();
-                self.urldb.mark_visited(url.to_string());
+                self.urldb.mark_visited(url.as_str());
                 self.urls_from_doc(&url, &doc_string);
                 Some(doc)
             }
@@ -407,12 +427,12 @@ impl Spider {
                 Error::EarlyTerminationError => {
                     // empty on purpose for now;
                     //
-                    //self.urldb.mark_unvisited(url.to_string());
+                    //self.urldb.mark_unvisited(url.as_str());
                     //debug!("terminated while fetching: {}", url.as_str());
                     None
                 }
                 _ => {
-                    self.urldb.mark_errored(url.to_string());
+                    self.urldb.mark_errored(url.as_str());
                     warn!("error fetching page {}: {}", url.as_str(), e);
                     None
                 }
@@ -487,7 +507,7 @@ impl Spider {
                     let final_url = Self::url_from_href(url, href);
                     match final_url {
                         Err(_e) => continue, // just skip href;
-                        Ok(u) => self.conditional_insert_url(u, elem),
+                        Ok(u) => self.conditional_insert_url(&u, elem),
                     }
                 }
             }
@@ -524,19 +544,19 @@ impl Spider {
     /// Conditionally save the given url if it adheres to configured options,
     /// determined by the given element; given element is intended to be the
     /// element from which  the url was extracted from.
-    fn conditional_insert_url(&mut self, url: String, elem: &Element) -> () {
-        if url.as_str() != "" {
+    fn conditional_insert_url(&mut self, url: &str, elem: &Element) -> () {
+        if url != "" {
             match elem.name() {
                 "link" => {
                     if self.opts.include_css() && elem.attr("rel").unwrap() == "stylesheet" {
-                        self.urldb.cond_mark_unvisited(url.clone());
+                        self.urldb.cond_mark_unvisited(url);
                     }
                     if self.opts.include_js() && elem.attr("as").unwrap() == "script" {
-                        self.urldb.cond_mark_unvisited(url.clone());
+                        self.urldb.cond_mark_unvisited(url);
                     }
                 }
                 "a" => {
-                    self.urldb.cond_mark_unvisited(url.clone());
+                    self.urldb.cond_mark_unvisited(url);
                 }
                 _ => {}
             }

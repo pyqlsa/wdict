@@ -14,7 +14,7 @@ use tokio::task::JoinHandle;
 use wdict::cli::{self, Cli, FilterArg, State};
 use wdict::collections::{UrlDb, WordDb};
 use wdict::crawl::{CrawlMode, CrawlOptions, Crawler};
-use wdict::extract::{ExtractOptions, Extractor};
+use wdict::extract::ExtractOptions;
 use wdict::{Error, Shutdown};
 
 /// Main function.
@@ -89,20 +89,20 @@ async fn main() -> Result<(), Error> {
     );
 
     let urldb: UrlDb = UrlDb::new();
-    let mut u = urldb.clone();
-    cli::fill_urldb_from_state(&mut u, &mut in_state); // resume
+    let mut uc = urldb.clone();
+    cli::fill_urldb_from_state(&mut uc, &mut in_state); // resume
 
-    let words: WordDb = WordDb::new();
-    let mut w = words.clone();
+    let worddb: WordDb = WordDb::new();
+    let mut wc = worddb.clone();
     if args.target.resume || args.target.resume_strict || args.append {
-        cli::fill_worddb_from_file(&mut w, &args.output);
+        cli::fill_worddb_from_file(&mut wc, &args.output);
     }
 
-    let e = Extractor::new(eopts, w);
     let mut crawler = Crawler::new(
         copts,
-        u,
-        e,
+        eopts,
+        uc,
+        wc,
         Shutdown::new(notify_shutdown.subscribe()),
         multi.clone(),
     )?;
@@ -129,7 +129,7 @@ async fn main() -> Result<(), Error> {
     }
 
     let len_urls = urldb.num_visited_urls();
-    let len_words = words.len();
+    let len_words = worddb.len();
     info!(
         "reached depth: {}; unique words {}; visited urls: {}",
         depth_reached, len_words, len_urls
@@ -141,7 +141,7 @@ async fn main() -> Result<(), Error> {
         let mut file =
             fs::File::create(args.output.clone()).expect("Error creating dictionary file");
         let mut contents = String::new();
-        words.iter().for_each(|word| {
+        worddb.iter().for_each(|word| {
             let line = format!("{}\n", word);
             contents.push_str(&line);
         });
