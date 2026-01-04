@@ -2,6 +2,7 @@ use bytes::Bytes;
 use indicatif::{MultiProgress, ProgressBar, ProgressStyle};
 use log::{debug, info, trace, warn};
 use ratelimit::Ratelimiter;
+use reqwest::header::HeaderMap;
 use reqwest::{Client, Url};
 use scraper::{node::Element, node::Node, Html};
 use std::collections::VecDeque;
@@ -94,6 +95,12 @@ impl Crawler {
         let user_agent = copts.user_agent();
         let builder = if let Some(ua) = user_agent {
             builder.user_agent(ua)
+        } else {
+            builder
+        };
+        let headers = copts.headers();
+        let builder = if let Some(h) = headers {
+            builder.default_headers(h)
         } else {
             builder
         };
@@ -481,14 +488,14 @@ impl Spider {
                 } else {
                     debug!("unexpected error: {}", e);
                 }
-                Err(Error::RequestError { why: e })
+                Err(Error::RequestError(e))
             }
             Ok(res) => {
                 let r = res.bytes().await;
                 match r {
                     Err(e) => {
                         debug!("error reading request response: {}", e);
-                        Err(Error::RequestError { why: e })
+                        Err(Error::RequestError(e))
                     }
                     Ok(ress) => Ok(ress),
                 }
@@ -526,7 +533,9 @@ impl Spider {
         if href == "" || href.starts_with('#') {
             // ignore whitespace and anchors; probably need a better error for this, but it's
             // generally ignored anyways
-            return Err(Error::StrWhitespaceError);
+            return Err(Error::GeneralError(
+                "href cannot be empty, nor include anchors".to_string(),
+            ));
         }
         let result = Url::parse(href);
         match result {
@@ -541,7 +550,7 @@ impl Spider {
                 if let Ok(joined_url) = url.join(href) {
                     return Ok(String::from(joined_url.as_str()));
                 } else {
-                    return Err(Error::UrlParseError { why: e });
+                    return Err(Error::UrlParseError(e));
                 }
             }
         }
@@ -589,8 +598,10 @@ pub struct CrawlOptions {
     limit_concurrent: usize,
     /// Crawl mode.
     mode: CrawlMode,
-    /// Custom User Agent
+    /// Custom User Agent string.
     user_agent: Option<String>,
+    /// Custom HTTP headers.
+    headers: Option<HeaderMap>,
 }
 
 impl CrawlOptions {
@@ -605,6 +616,7 @@ impl CrawlOptions {
         limit_concurrent: usize,
         mode: CrawlMode,
         user_agent: Option<String>,
+        headers: Option<HeaderMap>,
     ) -> Self {
         Self {
             url: url.clone(),
@@ -616,6 +628,7 @@ impl CrawlOptions {
             limit_concurrent,
             mode,
             user_agent,
+            headers,
         }
     }
 
@@ -657,6 +670,11 @@ impl CrawlOptions {
     /// Returns the configured user agent string.
     pub fn user_agent(&self) -> Option<String> {
         self.user_agent.clone()
+    }
+
+    /// Returns the configured custom HTTP headers.
+    pub fn headers(&self) -> Option<HeaderMap> {
+        self.headers.clone()
     }
 }
 

@@ -126,6 +126,9 @@ Options:
       --user-agent <USER_AGENT>
           User Agent string to send with requests
 
+      --header <HEADER>
+          HTTP headers to send with requests; can be specified multiple times (key=value)
+
   -r, --req-per-sec <REQ_PER_SEC>
           Number of requests to make per second
 

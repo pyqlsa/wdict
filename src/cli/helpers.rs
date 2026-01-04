@@ -1,8 +1,10 @@
 use clap::builder::ValueParser;
 use log::warn;
+use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Url;
 use std::fs;
 use std::io::{self, BufRead};
+use std::str::FromStr;
 
 use crate::collections::{UrlDb, WordDb};
 use crate::error::Error;
@@ -22,6 +24,7 @@ pub struct State {
     pub errored: Vec<String>,
     pub site_policy: SitePolicyArg,
     pub user_agent: Option<String>,
+    pub headers: Option<Vec<(String, String)>>,
     pub filters: Vec<FilterArg>,
     pub depth: usize,
     pub include_js: bool,
@@ -33,7 +36,7 @@ pub struct State {
 }
 
 impl State {
-    /// Returns a new UrlDb instance.
+    /// Returns a new State instance.
     pub fn new(url: &str) -> Self {
         Self {
             starting_url: url.to_string(),
@@ -45,6 +48,7 @@ impl State {
             errored: Vec::new(),
             site_policy: SitePolicyArg::Same,
             user_agent: None,
+            headers: None,
             filters: Vec::new(),
             depth: 1,
             include_js: false,
@@ -55,6 +59,8 @@ impl State {
             limit_concurrent: 5,
         }
     }
+
+    /// Returns a new State instance constructed from the given file path.
     pub fn new_from_file(file: &str) -> Result<State, Error> {
         let contents = fs::read_to_string(file)?;
         let state: State = serde_json::from_str(contents.as_str())?;
@@ -69,58 +75,112 @@ pub fn str_not_whitespace_parser() -> ValueParser {
 
 pub fn str_not_whitespace(value: &str) -> Result<String, Error> {
     if value.len() < 1 || value.trim().len() != value.len() {
-        Err(Error::StrWhitespaceError)
+        Err(Error::GeneralError(
+            "value cannot have leading/trailing whitespace, nor consist of only whitespace"
+                .to_string(),
+        ))
     } else {
         Ok(value.trim().to_string())
     }
 }
 
+pub fn headers_parser() -> ValueParser {
+    ValueParser::new(parse_key_val)
+}
+
+pub fn parse_key_val(s: &str) -> Result<(String, String), Error> {
+    s.split_once('=')
+        .map(|(key, val)| (key.to_owned(), val.to_owned()))
+        .ok_or(Error::GeneralError(
+            "invalid header format; use 'key=value'".to_string(),
+        ))
+}
+
 /// Helper for url parsing, predominantly to squash errors.
-pub fn parse_url(url_str: &str) -> Result<Url, ()> {
+pub fn parse_url(url_str: &str) -> Result<Url, Error> {
     let res = Url::parse(url_str);
     match res {
-        Err(e) => {
-            warn!("error parsing url {}: {}", url_str, e);
-            Err(())
-        }
+        Err(e) => Err(Error::UrlParseError(e)),
         Ok(u) => Ok(u),
     }
 }
 
+/// Helper for header parsing from HashMap to HeaderMap.
+pub fn parse_headers(hashmap: &Option<Vec<(String, String)>>) -> Result<Option<HeaderMap>, Error> {
+    let mut headermap = HeaderMap::new();
+    if let Some(hm) = hashmap {
+        for (key, val) in hm {
+            let hk_res = HeaderName::from_str(key.to_lowercase().as_ref());
+            if let Err(e) = hk_res {
+                return Err(Error::HeaderNameError(e));
+            }
+
+            let hv_res = HeaderValue::from_str(val.as_ref());
+            if let Err(e) = hv_res {
+                return Err(Error::HeaderValueError(e));
+            }
+
+            let hk = hk_res.unwrap();
+            let hv = hv_res.unwrap();
+            headermap.insert(hk, hv);
+        }
+    }
+    if headermap.len() < 1 {
+        Ok(None)
+    } else {
+        Ok(Some(headermap))
+    }
+}
+
 /// Helper for parsing a Target from cli args into a Url.
-pub fn parse_target(args: &Cli) -> Result<Url, ()> {
+pub fn parse_target(args: &Cli) -> Result<Url, Error> {
     let t = &args.target;
     if let Some(url_str) = t.url.as_deref() {
-        return parse_url(url_str);
+        let res = parse_url(url_str);
+        match res {
+            Err(e) => {
+                warn!("error parsing url {}", url_str);
+                return Err(e);
+            }
+            Ok(u) => return Ok(u),
+        }
     }
 
     if let Some(t) = t.theme {
-        return parse_url(t.as_str());
+        let res = parse_url(t.as_str());
+        match res {
+            Err(e) => {
+                warn!("error parsing theme url {}", t.as_str());
+                return Err(e);
+            }
+            Ok(u) => return Ok(u),
+        }
     }
 
     if let Some(p) = t.path.as_deref() {
         let res = utils::url_from_path_str(&p);
         match res {
             Err(e) => {
-                warn!("error parsing path {} as url: {}", p, e);
-                return Err(());
+                warn!("error parsing path {} as url", p);
+                Err(e)
             }
-            Ok(u) => {
-                return parse_url(&u.as_str());
-            }
+            Ok(u) => parse_url(&u.as_str()),
         }
+    } else {
+        Err(Error::GeneralError(
+            "no valid crawl target detected".to_string(),
+        ))
     }
-
-    return Err(());
 }
-/// Helper for parsing a State from cli args.
-pub fn parse_state(args: &Cli) -> Result<State, ()> {
+
+/// Build an initial State based on cli args.
+pub fn build_initial_state(args: &Cli) -> Result<State, Error> {
     if args.target.resume || args.target.resume_strict {
         let state_res = State::new_from_file(args.state_file.as_str());
         match state_res {
             Err(e) => {
-                warn!("error extracting state from {}: {}", args.state_file, e);
-                return Err(());
+                warn!("error extracting state from {}", args.state_file);
+                return Err(e);
             }
             Ok(s) => {
                 return Ok(s);
@@ -128,12 +188,12 @@ pub fn parse_state(args: &Cli) -> Result<State, ()> {
         }
     }
     let url_res = parse_target(&args);
-    if let Err(_) = url_res {
-        return Err(());
+    if let Err(e) = url_res {
+        warn!("error parsing target");
+        return Err(e);
     }
-    let url = url_res.unwrap();
 
-    return Ok(State::new(url.as_str()));
+    Ok(State::new(url_res.unwrap().as_str()))
 }
 
 // Popuplate urldb from state; state urls are consumed.

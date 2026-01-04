@@ -33,14 +33,17 @@ async fn main() -> Result<(), Error> {
         );
     }
 
-    let state_res = cli::parse_state(&args);
-    if let Err(_) = state_res {
+    let state_res = cli::build_initial_state(&args);
+    if let Err(e) = state_res {
+        error!("{}", e);
         exit(1);
     }
     let mut in_state = state_res.unwrap();
 
-    let url_res = cli::parse_url(in_state.starting_url.as_str());
-    if let Err(_) = url_res {
+    let state_url = in_state.starting_url.as_str();
+    let url_res = cli::parse_url(state_url);
+    if let Err(e) = url_res {
+        error!("error parsing url '{}' from state: {}", state_url, e);
         exit(1);
     }
     let url = url_res.unwrap();
@@ -57,12 +60,20 @@ async fn main() -> Result<(), Error> {
         args.include_css = in_state.include_css;
         args.site_policy = in_state.site_policy;
         args.user_agent = in_state.user_agent.clone();
+        args.header = in_state.headers.clone();
         args.req_per_sec = in_state.req_per_sec;
         args.limit_concurrent = in_state.limit_concurrent;
         args.min_word_length = in_state.min_word_length;
         args.max_word_length = in_state.max_word_length;
         args.filters = in_state.filters.drain(0..).collect();
     }
+
+    let headers_res = cli::parse_headers(&args.header);
+    if let Err(e) = headers_res {
+        error!("{}", e);
+        exit(1);
+    }
+    let headers = headers_res.unwrap();
 
     info!(
         "using '{}' as target with crawl mode: {}",
@@ -81,6 +92,7 @@ async fn main() -> Result<(), Error> {
         args.limit_concurrent,
         crawl_mode,
         args.user_agent.clone(),
+        headers,
     );
     let eopts = ExtractOptions::new(
         args.min_word_length,
@@ -171,6 +183,7 @@ async fn main() -> Result<(), Error> {
             max_word_length: args.max_word_length,
             site_policy: args.site_policy,
             user_agent: args.user_agent,
+            headers: args.header,
         };
         let url_file = args.state_file;
         if let Ok(j) = serde_json::to_string_pretty(&out_state) {

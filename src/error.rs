@@ -1,63 +1,76 @@
 #[derive(Debug)]
 /// Errors that can occur
 pub enum Error {
-    IoError { why: std::io::Error },
-    RequestError { why: reqwest::Error },
-    UrlParseError { why: url::ParseError },
-    RateLimitError { why: ratelimit::Error },
-    SerdeError { why: serde_json::Error },
-    StrWhitespaceError,
+    IoError(std::io::Error),
+    RequestError(reqwest::Error),
+    UrlParseError(url::ParseError),
+    RateLimitError(ratelimit::Error),
+    SerdeError(serde_json::Error),
+    HeaderNameError(reqwest::header::InvalidHeaderName),
+    HeaderValueError(reqwest::header::InvalidHeaderValue),
     EarlyTerminationError,
+    GeneralError(String),
 }
 
 impl std::error::Error for Error {}
 
 impl From<std::io::Error> for Error {
-    fn from(why: std::io::Error) -> Error {
-        Error::IoError { why }
+    fn from(e: std::io::Error) -> Error {
+        Error::IoError(e)
     }
 }
 impl From<reqwest::Error> for Error {
-    fn from(why: reqwest::Error) -> Error {
-        Error::RequestError { why }
+    fn from(e: reqwest::Error) -> Error {
+        Error::RequestError(e)
     }
 }
 
 impl From<url::ParseError> for Error {
-    fn from(why: url::ParseError) -> Error {
-        Error::UrlParseError { why }
+    fn from(e: url::ParseError) -> Error {
+        Error::UrlParseError(e)
     }
 }
 
 impl From<ratelimit::Error> for Error {
-    fn from(why: ratelimit::Error) -> Error {
-        Error::RateLimitError { why }
+    fn from(e: ratelimit::Error) -> Error {
+        Error::RateLimitError(e)
     }
 }
 
 impl From<serde_json::Error> for Error {
-    fn from(why: serde_json::Error) -> Error {
-        Error::SerdeError { why }
+    fn from(e: serde_json::Error) -> Error {
+        Error::SerdeError(e)
+    }
+}
+
+impl From<reqwest::header::InvalidHeaderValue> for Error {
+    fn from(e: reqwest::header::InvalidHeaderValue) -> Error {
+        Error::HeaderValueError(e)
+    }
+}
+
+impl From<reqwest::header::InvalidHeaderName> for Error {
+    fn from(e: reqwest::header::InvalidHeaderName) -> Error {
+        Error::HeaderNameError(e)
     }
 }
 
 impl std::fmt::Display for Error {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        let error = match *self {
-            Error::IoError { ref why } => format!("io error: {}", why),
-            Error::RequestError { ref why } => format!("request error: {}", why),
-            Error::UrlParseError { ref why } => format!("url parsing error: {}", why),
-            Error::RateLimitError { ref why } => format!("ratelimit error: {}", why),
-            Error::SerdeError { ref why } => {
-                format!("serde serialize/deserialize error: {}", why)
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Error::IoError(e) => write!(f, "io error: {}", e),
+            Error::RequestError(e) => write!(f, "request error: {}", e),
+            Error::UrlParseError(e) => write!(f, "url parsing error: {}", e),
+            Error::RateLimitError(e) => write!(f, "ratelimit error: {}", e),
+            Error::SerdeError(e) => {
+                write!(f, "serde serialize/deserialize error: {}", e)
             }
-            Error::StrWhitespaceError => {
-                format!(
-                    "value cannot have leading/trailing whitespace, nor consist of only whitespace"
-                )
+            Error::HeaderNameError(e) => write!(f, "header error: {}", e),
+            Error::HeaderValueError(e) => write!(f, "header error: {}", e),
+            Error::EarlyTerminationError => write!(f, "terminated early"),
+            Error::GeneralError(s) => {
+                write!(f, "parse error: {}", s)
             }
-            Error::EarlyTerminationError => format!("terminating early"),
-        };
-        f.write_str(&error)
+        }
     }
 }
