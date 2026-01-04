@@ -112,7 +112,7 @@ Options:
 
           [default: none]
 
-      --site-policy <SITE_POLICY>
+  -s, --site-policy <SITE_POLICY>
           Site policy for discovered URLs
 
           Possible values:
@@ -122,6 +122,9 @@ Options:
           - all:       Allow crawling all URLs, regardless of domain
 
           [default: same]
+
+      --user-agent <USER_AGENT>
+          User Agent string to send with requests
 
   -r, --req-per-sec <REQ_PER_SEC>
           Number of requests to make per second

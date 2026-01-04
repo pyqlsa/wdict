@@ -56,6 +56,7 @@ async fn main() -> Result<(), Error> {
         args.include_js = in_state.include_js;
         args.include_css = in_state.include_css;
         args.site_policy = in_state.site_policy;
+        args.user_agent = in_state.user_agent.clone();
         args.req_per_sec = in_state.req_per_sec;
         args.limit_concurrent = in_state.limit_concurrent;
         args.min_word_length = in_state.min_word_length;
@@ -79,6 +80,7 @@ async fn main() -> Result<(), Error> {
         args.req_per_sec,
         args.limit_concurrent,
         crawl_mode,
+        args.user_agent.clone(),
     );
     let eopts = ExtractOptions::new(
         args.min_word_length,
@@ -168,6 +170,7 @@ async fn main() -> Result<(), Error> {
             min_word_length: args.min_word_length,
             max_word_length: args.max_word_length,
             site_policy: args.site_policy,
+            user_agent: args.user_agent,
         };
         let url_file = args.state_file;
         if let Ok(j) = serde_json::to_string_pretty(&out_state) {

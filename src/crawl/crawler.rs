@@ -88,10 +88,16 @@ impl Crawler {
         shutdown: Shutdown,
         multiprog: MultiProgress,
     ) -> Result<Self, Error> {
-        let client = Client::builder()
+        let builder = Client::builder()
             .connect_timeout(Duration::from_secs(5))
-            .timeout(Duration::from_secs(10))
-            .build()?;
+            .timeout(Duration::from_secs(10));
+        let user_agent = copts.user_agent();
+        let builder = if let Some(ua) = user_agent {
+            builder.user_agent(ua)
+        } else {
+            builder
+        };
+        let client = builder.build()?;
         Self::new_with_client(client, copts, eopts, urldb, worddb, shutdown, multiprog)
     }
 
@@ -583,6 +589,8 @@ pub struct CrawlOptions {
     limit_concurrent: usize,
     /// Crawl mode.
     mode: CrawlMode,
+    /// Custom User Agent
+    user_agent: Option<String>,
 }
 
 impl CrawlOptions {
@@ -596,6 +604,7 @@ impl CrawlOptions {
         req_per_sec: u64,
         limit_concurrent: usize,
         mode: CrawlMode,
+        user_agent: Option<String>,
     ) -> Self {
         Self {
             url: url.clone(),
@@ -606,6 +615,7 @@ impl CrawlOptions {
             req_per_sec,
             limit_concurrent,
             mode,
+            user_agent,
         }
     }
 
@@ -642,6 +652,11 @@ impl CrawlOptions {
     /// Returns the configured site policy for visiting discovered URLs.
     pub fn site(&self) -> SitePolicy {
         self.site
+    }
+
+    /// Returns the configured user agent string.
+    pub fn user_agent(&self) -> Option<String> {
+        self.user_agent.clone()
     }
 }
 
