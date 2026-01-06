@@ -1,5 +1,5 @@
 use clap::builder::ValueParser;
-use log::warn;
+use log::{info, warn};
 use reqwest::header::{HeaderMap, HeaderName, HeaderValue};
 use reqwest::Url;
 use std::fs;
@@ -15,7 +15,7 @@ use super::{Cli, FilterArg, SitePolicyArg};
 /// Helper for json output URL file.
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
 pub struct State {
-    pub starting_url: String,
+    pub starting_url: Url,
     pub depth_reached: usize,
     pub visited: Vec<String>,
     pub staged: Vec<String>,
@@ -37,9 +37,9 @@ pub struct State {
 
 impl State {
     /// Returns a new State instance.
-    pub fn new(url: &str) -> Self {
+    pub fn new(url: Url) -> Self {
         Self {
-            starting_url: url.to_string(),
+            starting_url: url.clone(),
             depth_reached: 0,
             visited: Vec::new(),
             staged: Vec::new(),
@@ -96,7 +96,7 @@ pub fn parse_key_val(s: &str) -> Result<(String, String), Error> {
         ))
 }
 
-/// Helper for url parsing, predominantly to squash errors.
+/// Helper for url parsing, predominantly to wrap errors.
 pub fn parse_url(url_str: &str) -> Result<Url, Error> {
     let res = Url::parse(url_str);
     match res {
@@ -139,7 +139,7 @@ pub fn parse_target(args: &Cli) -> Result<Url, Error> {
         let res = parse_url(url_str);
         match res {
             Err(e) => {
-                warn!("error parsing url {}", url_str);
+                warn!("error parsing target url {}", url_str);
                 return Err(e);
             }
             Ok(u) => return Ok(u),
@@ -150,7 +150,7 @@ pub fn parse_target(args: &Cli) -> Result<Url, Error> {
         let res = parse_url(t.as_str());
         match res {
             Err(e) => {
-                warn!("error parsing theme url {}", t.as_str());
+                warn!("error parsing target theme url {}", t.as_str());
                 return Err(e);
             }
             Ok(u) => return Ok(u),
@@ -161,7 +161,7 @@ pub fn parse_target(args: &Cli) -> Result<Url, Error> {
         let res = utils::url_from_path_str(&p);
         match res {
             Err(e) => {
-                warn!("error parsing path {} as url", p);
+                warn!("error parsing target path {} as url", p);
                 Err(e)
             }
             Ok(u) => parse_url(&u.as_str()),
@@ -174,26 +174,33 @@ pub fn parse_target(args: &Cli) -> Result<Url, Error> {
 }
 
 /// Build an initial State based on cli args.
-pub fn build_initial_state(args: &Cli) -> Result<State, Error> {
-    if args.target.resume || args.target.resume_strict {
-        let state_res = State::new_from_file(args.state_file.as_str());
-        match state_res {
-            Err(e) => {
-                warn!("error extracting state from {}", args.state_file);
-                return Err(e);
-            }
-            Ok(s) => {
-                return Ok(s);
-            }
-        }
-    }
-    let url_res = parse_target(&args);
-    if let Err(e) = url_res {
-        warn!("error parsing target");
-        return Err(e);
+pub fn build_initial_state(args: &mut Cli) -> Result<State, Error> {
+    let state = if args.target.resume || args.target.resume_strict {
+        info!(
+            "resuming from state '{}' and dictionary '{}'",
+            args.state_file, args.output
+        );
+        State::new_from_file(args.state_file.as_str())?
+    } else {
+        let url = parse_target(&args)?;
+        State::new(url)
+    };
+
+    if args.target.resume_strict {
+        args.depth = state.depth;
+        args.include_js = state.include_js;
+        args.include_css = state.include_css;
+        args.site_policy = state.site_policy;
+        args.user_agent = state.user_agent.clone();
+        args.header = state.headers.clone();
+        args.req_per_sec = state.req_per_sec;
+        args.limit_concurrent = state.limit_concurrent;
+        args.min_word_length = state.min_word_length;
+        args.max_word_length = state.max_word_length;
+        args.filters = state.filters.clone();
     }
 
-    Ok(State::new(url_res.unwrap().as_str()))
+    Ok(state)
 }
 
 // Popuplate urldb from state; state urls are consumed.
