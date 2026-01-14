@@ -39,8 +39,14 @@ pub struct Cli {
     )]
     pub filters: Vec<FilterArg>,
     /// Site policy for discovered URLs.
-    #[arg(long, default_value = "same", value_enum)]
+    #[arg(short, long, default_value = "same", value_enum)]
     pub site_policy: SitePolicyArg,
+    /// User Agent string to send with requests.
+    #[arg(long, value_parser = helpers::str_not_whitespace_parser())]
+    pub user_agent: Option<String>,
+    /// HTTP headers to send with requests; can be specified multiple times (key=value).
+    #[arg(long, value_parser = helpers::headers_parser())]
+    pub header: Option<Vec<(String, String)>>,
     /// Number of requests to make per second.
     #[arg(short, long, default_value_t = 10)]
     pub req_per_sec: u64,

@@ -22,28 +22,16 @@ use wdict::{Error, Shutdown};
 async fn main() -> Result<(), Error> {
     let mut args = Cli::parse();
 
-    let filter = args.verbose.log_level_filter();
     let multi = MultiProgress::new();
-    setup_logger(multi.clone(), &filter);
+    setup_logger(multi.clone(), &args.verbose.log_level_filter());
 
-    if args.target.resume || args.target.resume_strict {
-        info!(
-            "resuming from state '{}' and dictionary '{}'",
-            args.state_file, args.output
-        );
-    }
-
-    let state_res = cli::parse_state(&args);
-    if let Err(_) = state_res {
+    let state_res = cli::build_initial_state(&mut args);
+    if let Err(e) = state_res {
+        error!("{}", e);
         exit(1);
     }
     let mut in_state = state_res.unwrap();
-
-    let url_res = cli::parse_url(in_state.starting_url.as_str());
-    if let Err(_) = url_res {
-        exit(1);
-    }
-    let url = url_res.unwrap();
+    let url = in_state.starting_url.clone();
 
     let crawl_mode = if url.scheme() == "file" {
         CrawlMode::Local
@@ -51,17 +39,12 @@ async fn main() -> Result<(), Error> {
         CrawlMode::Web
     };
 
-    if args.target.resume_strict {
-        args.depth = in_state.depth;
-        args.include_js = in_state.include_js;
-        args.include_css = in_state.include_css;
-        args.site_policy = in_state.site_policy;
-        args.req_per_sec = in_state.req_per_sec;
-        args.limit_concurrent = in_state.limit_concurrent;
-        args.min_word_length = in_state.min_word_length;
-        args.max_word_length = in_state.max_word_length;
-        args.filters = in_state.filters.drain(0..).collect();
+    let headers_res = cli::parse_headers(&args.header);
+    if let Err(e) = headers_res {
+        error!("{}", e);
+        exit(1);
     }
+    let headers = headers_res.unwrap();
 
     info!(
         "using '{}' as target with crawl mode: {}",
@@ -79,6 +62,8 @@ async fn main() -> Result<(), Error> {
         args.req_per_sec,
         args.limit_concurrent,
         crawl_mode,
+        args.user_agent.clone(),
+        headers,
     );
     let eopts = ExtractOptions::new(
         args.min_word_length,
@@ -152,7 +137,7 @@ async fn main() -> Result<(), Error> {
 
     if args.output_state {
         let out_state = State {
-            starting_url: url.to_string(),
+            starting_url: url,
             depth_reached,
             visited: urldb.visited_urls_iter().collect(),
             staged: urldb.staged_urls_iter().collect(),
@@ -168,6 +153,8 @@ async fn main() -> Result<(), Error> {
             min_word_length: args.min_word_length,
             max_word_length: args.max_word_length,
             site_policy: args.site_policy,
+            user_agent: args.user_agent,
+            headers: args.header,
         };
         let url_file = args.state_file;
         if let Ok(j) = serde_json::to_string_pretty(&out_state) {
